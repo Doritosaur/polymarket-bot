@@ -1,0 +1,22 @@
+{
+  "name": "polymarket-bot",
+  "version": "1.0.0",
+  "description": "A Bun bot for Polymarket",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/index.js",
+    "dev": "bun --watch src/index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "bullmq": "^5.66.4",
+    "discord.js": "^14.14.1",
+    "dotenv": "^16.3.1",
+    "ethers": "^6.9.0",
+    "express": "^4.22.1",
+    "ioredis": "^5.9.0"
+  }
+}
