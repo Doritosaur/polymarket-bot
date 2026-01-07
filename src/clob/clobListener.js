@@ -1,6 +1,6 @@
 import { marketRegistry } from '../database/marketRegistry.js';
 import { config } from '../config.js';
-import { addTradeToQueue } from '../queue/tradeQueue.js';
+import { TradeAggregator } from './TradeAggregator.js';
 
 const WS_URL = config.clobWsUrl;
 
@@ -12,7 +12,8 @@ class ClobListener {
         this.reconnectAttempts = 0;
         this.shouldReconnect = true;
         this.reconnectTimeout = null;
-        this.minAmountThreshold = config.minAmountThreshold; // Default
+
+        this.aggregator = new TradeAggregator();
     }
 
     async start(specifiedConditionId = null) {
@@ -21,15 +22,13 @@ class ClobListener {
         }
 
         console.log('Starting CLOB Listener...');
-        this.subscribedAssets.clear(); // Optimization: Clear old state to prevent memory leaks
+        this.subscribedAssets.clear();
 
-        // Load stored settings if available
+        // Sync global threshold from registry to aggregator
         const storedThreshold = marketRegistry.getSetting('minAmountThreshold');
         if (storedThreshold) {
-            this.minAmountThreshold = parseFloat(storedThreshold);
-            console.log(`Loaded stored threshold: ${this.minAmountThreshold}`);
-        } else {
-            console.log(`Using config threshold: ${this.minAmountThreshold}`);
+            this.aggregator.setGlobalThreshold(storedThreshold);
+            console.log(`Loaded stored threshold: ${storedThreshold}`);
         }
 
         let MARKETS_TO_MONITOR = [];
@@ -78,12 +77,14 @@ class ClobListener {
                 this.subscribedAssets.set(yes, {
                     conditionId: market.condition_id,
                     slug: market.slug,
-                    outcome: 'YES'
+                    outcome: 'YES',
+                    threshold: market.threshold
                 });
                 this.subscribedAssets.set(no, {
                     conditionId: market.condition_id,
                     slug: market.slug,
-                    outcome: 'NO'
+                    outcome: 'NO',
+                    threshold: market.threshold
                 });
             } catch (error) {
                 console.error(`Failed to derive IDs for ${market.condition_id}:`, error);
@@ -154,8 +155,7 @@ class ClobListener {
     }
 
     setThreshold(val) {
-        this.minAmountThreshold = parseFloat(val);
-        console.log(`[CLOB] Threshold updated to ${this.minAmountThreshold}`);
+        this.aggregator.setGlobalThreshold(val);
     }
 
     handleMessage(msg) {
@@ -171,35 +171,30 @@ class ClobListener {
     async processUpdate(update) {
         if (!update || !update.asset_id) return;
         if (update.type === "pong") return;
+
         const assetInfo = this.subscribedAssets.get(update.asset_id);
         if (!assetInfo) return;
+
         if (update.event_type === "last_trade_price") {
-            const price = parseFloat(update.price);
-            const size = parseFloat(update.size);
-            const tradeValue = price * size;
-
-            console.log(`[TRADE] ${assetInfo.slug} (${assetInfo.outcome}) traded at ${price} (Size: ${size}, Side: ${update.side})`);
-
-            if (tradeValue >= this.minAmountThreshold) {
-                addTradeToQueue({
-                    type: 'trade',
-                    tradeType: update.side,
-                    marketName: assetInfo.slug,
-                    outcome: assetInfo.outcome,
-                    amount: update.size,
-                    price: update.price,
-                    value: tradeValue.toFixed(2),
-                    timestamp: update.timestamp ? parseInt(update.timestamp) : Date.now()
-                });
-            }
+            this.aggregator.processTrade({
+                price: parseFloat(update.price),
+                size: parseFloat(update.size),
+                side: update.side,
+                timestamp: update.timestamp,
+                assetInfo
+            });
         }
     }
 
-    stop() {
+    stop(clearPending = true) {
         this.shouldReconnect = false;
         if (this.reconnectTimeout) {
             clearTimeout(this.reconnectTimeout);
             this.reconnectTimeout = null;
+        }
+
+        if (clearPending) {
+            this.aggregator.clearPending();
         }
 
         if (this.ws) {
@@ -213,12 +208,12 @@ class ClobListener {
     }
 
     async restart() {
-        this.stop();
+        this.stop(false);
         return this.start();
     }
 
     async cleanup() {
-        return this.stop();
+        return this.stop(true);
     }
 
     getActiveListenersCount() {

@@ -17,64 +17,68 @@ Monitor Polymarket smart contracts for large transactions and get Discord notifi
 3. Configure `.env`:
    ```env
    PORT=3000
+   
+   # RPC Configuration (Polygon)
    RPC_URL=https://polygon-rpc.com
-   RPC_WS_URL=wss://polygon-rpc.com
-   MIN_AMOUNT_THRESHOLD=100000
+   # Optional: Only needed if you want to use a specific WS endpoint. Defaults to RPC_URL with ws://
+   # RPC_WS_URL=wss://polygon-rpc.com
+
+   # Polymarket CLOB Configuration
+   CLOB_WS_URL=wss://ws-subscriptions-clob.polymarket.com/ws/market
+   
+   # Trading Threshold (USD)
+   MIN_AMOUNT_THRESHOLD=1000
+
+   # Discord Configuration
    DISCORD_TOKEN=your_bot_token
    DISCORD_CHANNEL_ID=your_channel_id
-   ```
    
-   **Important:** `RPC_WS_URL` is **required** for real-time event subscriptions. Use a WebSocket provider:
-   - Alchemy: `wss://polygon-mainnet.g.alchemy.com/v2/YOUR_API_KEY`
-   - Infura: `wss://polygon-mainnet.infura.io/ws/v3/YOUR_PROJECT_ID`
-   - Public: `wss://polygon-rpc.com`
+   # Redis Configuration
+   REDIS_HOST=localhost
+   REDIS_PORT=6379
+   
+   # Admin Security
+   ADMIN_API_KEY=changeme
+   ```
 
 4. Run:
    ```bash
    bun start
    ```
 
-## Discord Setup
+## Discord Commands
 
-1. Create a bot at https://discord.com/developers/applications
-2. Enable "Message Content Intent"
-3. Copy bot token to `.env`
-4. Enable Developer Mode in Discord, right-click channel → Copy Channel ID
+Manage the bot directly from Discord:
+
+*   **`!add <event_slug>`**: Add all markets for a specific Polymarket event.
+    *   *Example*: `!add presidential-election-2024`
+*   **`!remove <event_slug>`**: Remove all monitored markets for an event.
+    *   *Example*: `!remove presidential-election-2024`
+*   **`!setthreshold <amount>`**: Dynamically update the minimum trade amount ($) for notifications.
+    *   *Example*: `!setthreshold 5000`
 
 ## API
 
-**Add a contract:**
+**Add an event (and its markets):**
 ```bash
-curl -X POST http://localhost:3000/api/contracts \
-  -H "Content-Type: application/json" \
-  -d '{"address": "0x..."}'
+curl -X POST http://localhost:3000/api/events/presidential-election-2024 \
+  -H "x-api-key: changeme"
 ```
 
-**List contracts:**
+**Remove an event:**
 ```bash
-curl http://localhost:3000/api/contracts
-```
-
-**Remove a contract:**
-```bash
-curl -X DELETE http://localhost:3000/api/contracts/0x...
+curl -X DELETE http://localhost:3000/api/events/presidential-election-2024 \
+  -H "x-api-key: changeme"
 ```
 
 **Status:**
 - `GET /health` - Health check
-- `GET /status` - Server status
+- `GET /status` - Server status & market count
 
 ## How It Works
 
-1. Contracts stored in SQLite (`data/contracts.db`)
-2. WebSocket listeners monitor events in real-time
-3. Large transactions trigger Discord notifications
-
-## Environment Variables
-
-- `PORT` - Server port (default: 3000)
-- `RPC_URL` - Polygon RPC endpoint (HTTP, for initial connection)
-- `RPC_WS_URL` - **Required** - Polygon WebSocket RPC endpoint for real-time subscriptions
-- `MIN_AMOUNT_THRESHOLD` - Minimum token amount to notify (default: 10000)
-- `DISCORD_TOKEN` - Discord bot token
-- `DISCORD_CHANNEL_ID` - Discord channel ID
+1. **Market Monitoring**: connect to Polymarket's **CLOB (Central Limit Order Book)** via WebSocket for real-time trade data.
+2. **Filtering**: Trades are filtered by the `MIN_AMOUNT_THRESHOLD`.
+3. **Queueing**: Valid trades are pushed to a **Redis Queue** for reliable processing.
+4. **Processing**: Workers pick up trades, calculate implied probabilities locally (YES + NO = 100%), and format Discord embeds.
+5. **Notification**: Alerts are sent to the configured Discord channel.

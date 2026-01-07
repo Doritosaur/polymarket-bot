@@ -17,6 +17,7 @@ class MarketRegistry {
         event_slug TEXT,
         clob_token_ids TEXT,
         description TEXT,
+        threshold REAL,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         active INTEGER DEFAULT 1
@@ -36,6 +37,7 @@ class MarketRegistry {
             const hasSlug = tableInfo.some(c => c.name === 'slug');
             const hasClobTokenIds = tableInfo.some(c => c.name === 'clob_token_ids');
             const hasEventSlug = tableInfo.some(c => c.name === 'event_slug');
+            const hasThreshold = tableInfo.some(c => c.name === 'threshold');
 
             if (hasName && !hasSlug) {
                 console.log('Migrating database: renaming column name to slug...');
@@ -50,6 +52,18 @@ class MarketRegistry {
             if (!hasEventSlug) {
                 console.log('Migrating database: adding column event_slug...');
                 this.db.exec('ALTER TABLE markets ADD COLUMN event_slug TEXT');
+            }
+
+            if (!hasThreshold) {
+                console.log('Migrating database: adding column threshold...');
+                this.db.exec('ALTER TABLE markets ADD COLUMN threshold REAL');
+
+                // Backfill existing markets with current global default if available
+                const globalDefault = this.getSetting('minAmountThreshold');
+                if (globalDefault) {
+                    console.log(`Backfilling existing markets with threshold: ${globalDefault}`);
+                    this.db.exec(`UPDATE markets SET threshold = ${globalDefault} WHERE threshold IS NULL`);
+                }
             }
 
             // Create indices AFTER ensuring columns exist
@@ -86,24 +100,29 @@ class MarketRegistry {
     }
 
 
-    addMarket(conditionId, slug = null, description = null, clobTokenIds = null, eventSlug = null) {
+    addMarket(conditionId, slug = null, description = null, clobTokenIds = null, eventSlug = null, threshold = null) {
         try {
             const normalizedConditionId = this.normalizeConditionId(conditionId);
-            // clobTokenIds is expected to be a JSON string or null
+
+            if (threshold === null) {
+                const globalIdx = this.getSetting('minAmountThreshold');
+                if (globalIdx) threshold = parseFloat(globalIdx);
+            }
 
             const stmt = this.db.prepare(`
-        INSERT INTO markets (condition_id, slug, description, clob_token_ids, event_slug, active)
-        VALUES (?, ?, ?, ?, ?, 1)
+        INSERT INTO markets (condition_id, slug, description, clob_token_ids, event_slug, threshold, active)
+        VALUES (?, ?, ?, ?, ?, ?, 1)
         ON CONFLICT(condition_id) DO UPDATE SET
           slug = COALESCE(excluded.slug, slug),
           description = COALESCE(excluded.description, description),
           clob_token_ids = COALESCE(excluded.clob_token_ids, clob_token_ids),
           event_slug = COALESCE(excluded.event_slug, event_slug),
+          threshold = COALESCE(excluded.threshold, threshold),
           active = 1,
           updated_at = CURRENT_TIMESTAMP
       `);
 
-            stmt.run(normalizedConditionId, slug, description, clobTokenIds, eventSlug);
+            stmt.run(normalizedConditionId, slug, description, clobTokenIds, eventSlug, threshold);
             const id = this.db.lastInsertRowId;
 
             return {
@@ -113,6 +132,7 @@ class MarketRegistry {
                 description,
                 clobTokenIds,
                 eventSlug,
+                threshold,
                 active: true
             };
         } catch (error) {
@@ -151,9 +171,29 @@ class MarketRegistry {
         return true;
     }
 
+    setMarketThreshold(conditionId, amount) {
+        const normalizedConditionId = this.normalizeConditionId(conditionId);
+        const stmt = this.db.prepare(`
+            UPDATE markets SET threshold = ?, updated_at = CURRENT_TIMESTAMP WHERE condition_id = ?
+        `);
+        const result = stmt.run(amount, normalizedConditionId);
+        if (result.changes === 0) {
+            throw new Error(`Market ${conditionId} not found`);
+        }
+        return true;
+    }
+
+    // Fuzzy search helper for Discord command
+    findMarketBySlugPartial(partialSlug) {
+        const stmt = this.db.prepare(`
+            SELECT * FROM markets WHERE slug LIKE ? AND active = 1 LIMIT 1
+        `);
+        return stmt.get(`%${partialSlug}%`);
+    }
+
     getActiveMarkets() {
         const stmt = this.db.prepare(`
-      SELECT id, condition_id, slug, description, clob_token_ids, event_slug, created_at, updated_at
+      SELECT id, condition_id, slug, description, clob_token_ids, event_slug, threshold, created_at, updated_at
       FROM markets
       WHERE active = 1
       ORDER BY created_at DESC
@@ -164,7 +204,7 @@ class MarketRegistry {
 
     getAllMarkets() {
         const stmt = this.db.prepare(`
-      SELECT id, condition_id, slug, description, clob_token_ids, event_slug, active, created_at, updated_at
+      SELECT id, condition_id, slug, description, clob_token_ids, event_slug, threshold, active, created_at, updated_at
       FROM markets
       ORDER BY created_at DESC
     `);
@@ -176,7 +216,7 @@ class MarketRegistry {
         const normalizedConditionId = this.normalizeConditionId(conditionId);
 
         const stmt = this.db.prepare(`
-      SELECT id, condition_id, slug, description, clob_token_ids, event_slug, active, created_at, updated_at
+      SELECT id, condition_id, slug, description, clob_token_ids, event_slug, threshold, active, created_at, updated_at
       FROM markets
       WHERE condition_id = ?
     `);
@@ -189,7 +229,7 @@ class MarketRegistry {
 
     getMarketsByEventSlug(eventSlug) {
         const stmt = this.db.prepare(`
-        SELECT id, condition_id, slug, description, clob_token_ids, event_slug, active, created_at, updated_at
+        SELECT id, condition_id, slug, description, clob_token_ids, event_slug, threshold, active, created_at, updated_at
         FROM markets
         WHERE event_slug = ? AND active = 1
       `);

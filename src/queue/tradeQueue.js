@@ -13,13 +13,10 @@ export const tradeQueue = new Queue('trade-notification-queue', { connection });
 // 2. The Consumer Worker
 const worker = new Worker('trade-notification-queue', async (job) => {
     const tradeData = job.data;
-
-    // Calculate probabilities based on traded price
-    // Polymarket prices sum to 1.0 (approx). P(Yes) + P(No) = 1.0
     const tradedProb = (tradeData.price * 100).toFixed(4);
     const inverseProb = ((1 - tradeData.price) * 100).toFixed(4);
 
-    const side = tradeData.outcome; // 'YES' or 'NO'
+    const side = tradeData.outcome;
     const otherSide = side === 'YES' ? 'NO' : 'YES';
 
     const marketPrices = `**${side}:** ${tradedProb}% | **${otherSide}:** ${inverseProb}%`;
@@ -29,14 +26,13 @@ const worker = new Worker('trade-notification-queue', async (job) => {
         marketPrices
     };
 
-    // Send to Discord
     await notifyDiscord(notificationData);
 
 }, {
     connection,
     limiter: {
-        max: 5,         // Max 5 jobs
-        duration: 1000  // Per 1 second
+        max: 5,
+        duration: 1000
     }
 });
 
