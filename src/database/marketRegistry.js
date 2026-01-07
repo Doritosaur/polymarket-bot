@@ -22,10 +22,6 @@ class MarketRegistry {
         active INTEGER DEFAULT 1
       );
 
-      CREATE INDEX IF NOT EXISTS idx_markets_condition_id ON markets(condition_id);
-      CREATE INDEX IF NOT EXISTS idx_markets_active ON markets(active);
-      CREATE INDEX IF NOT EXISTS idx_markets_event_slug ON markets(event_slug);
-
       CREATE TABLE IF NOT EXISTS settings (
         key TEXT PRIMARY KEY,
         value TEXT,
@@ -54,8 +50,15 @@ class MarketRegistry {
             if (!hasEventSlug) {
                 console.log('Migrating database: adding column event_slug...');
                 this.db.exec('ALTER TABLE markets ADD COLUMN event_slug TEXT');
-                this.db.exec('CREATE INDEX IF NOT EXISTS idx_markets_event_slug ON markets(event_slug)');
             }
+
+            // Create indices AFTER ensuring columns exist
+            this.db.exec(`
+              CREATE INDEX IF NOT EXISTS idx_markets_condition_id ON markets(condition_id);
+              CREATE INDEX IF NOT EXISTS idx_markets_active ON markets(active);
+              CREATE INDEX IF NOT EXISTS idx_markets_event_slug ON markets(event_slug);
+            `);
+
         } catch (err) {
             console.warn('Migration check failed (ignoring):', err.message);
         }
