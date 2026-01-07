@@ -1,7 +1,7 @@
 import express from 'express';
 import { marketRegistry } from './database/marketRegistry.js';
-
 import { clobListener } from './clob/clobListener.js';
+import { config } from './config.js';
 
 export function createServer() {
   const app = express();
@@ -73,7 +73,16 @@ export function createServer() {
     }
   });
 
-  app.delete('/api/markets/:conditionId', async (req, res) => {
+  // Middleware for API Key Authentication
+  const requireAuth = (req, res, next) => {
+    const apiKey = req.get('x-api-key');
+    if (!apiKey || apiKey !== config.adminApiKey) {
+      return res.status(401).json({ success: false, error: 'Unauthorized: Invalid API Key' });
+    }
+    next();
+  };
+
+  app.delete('/api/markets/:conditionId', requireAuth, async (req, res) => {
     try {
       marketRegistry.removeMarket(req.params.conditionId);
       await clobListener.removeMarket(req.params.conditionId);
@@ -91,7 +100,64 @@ export function createServer() {
   });
 
 
-  app.post('/api/events/:slug', async (req, res) => {
+  app.delete('/api/events/:slug', requireAuth, async (req, res) => {
+    try {
+      const { slug } = req.params;
+
+      // 1. Fetch relevant markets from local database
+      // The `slug` param here is the EVENT slug (e.g. "presidential-election")
+      const markets = marketRegistry.getMarketsByEventSlug(slug);
+
+      if (markets.length === 0) {
+        return res.status(404).json({
+          success: false,
+          error: `No active markets found for event: ${slug} (or event not tracked)`
+        });
+      }
+
+      // 2. Identify which of these markets we are actually tracking
+      // Since we queried the DB, we know we are tracking ALL of them.
+      let removedCount = 0;
+      const removedConditionIds = [];
+
+      for (const market of markets) {
+        try {
+          marketRegistry.removeMarket(market.condition_id);
+          removedCount++;
+          removedConditionIds.push(market.condition_id);
+        } catch (err) {
+          console.error(`Error processing removal for ${market.condition_id}:`, err);
+        }
+      }
+
+      if (removedCount === 0) {
+        return res.status(404).json({
+          success: false,
+          error: `Event exists, but we are not tracking any of its markets.`
+        });
+      }
+
+      // 3. Batch remove from CLOB listener
+      if (removedConditionIds.length > 0) {
+        await clobListener.removeMarkets(removedConditionIds);
+      }
+
+      res.json({
+        success: true,
+        message: `Successfully removed ${removedCount} markets for event: ${slug}`,
+        removedCount
+      });
+
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+  });
+
+
+  app.post('/api/events/:slug', requireAuth, async (req, res) => {
     try {
       const { slug } = req.params;
 
@@ -124,7 +190,8 @@ export function createServer() {
               const description = market.question || market.description || name;
               const clobTokenIds = market.clobTokenIds;
 
-              marketRegistry.addMarket(market.conditionId, name, description, clobTokenIds);
+              // Pass 'slug' (the event slug) as the 5th argument
+              marketRegistry.addMarket(market.conditionId, name, description, clobTokenIds, slug);
               addedCount++;
               addedMarkets.push(market.conditionId);
             } catch (err) {
@@ -156,38 +223,4 @@ export function createServer() {
   return app;
 }
 
-const priceCache = new Map();
-const CACHE_TTL = 5000; // 5 seconds cache
 
-export async function fetchMarketOutcomePrices(slug) {
-  try {
-    const now = Date.now();
-    if (priceCache.has(slug)) {
-      const { timestamp, data } = priceCache.get(slug);
-      if (now - timestamp < CACHE_TTL) {
-        return data;
-      }
-    }
-
-    const response = await fetch(`https://gamma-api.polymarket.com/markets/slug/${slug}`);
-    if (!response.ok) return null;
-    const data = await response.json();
-
-    const outcomes = JSON.parse(data.outcomes);
-    const prices = JSON.parse(data.outcomePrices);
-
-    if (!outcomes || !prices || outcomes.length !== prices.length) return null;
-
-    const formattedPrices = outcomes.map((outcome, index) => {
-      const p = parseFloat(prices[index]);
-      return `**${outcome}:** ${(p * 100).toFixed(2)}%`;
-    }).join(' | ');
-
-    priceCache.set(slug, { timestamp: now, data: formattedPrices });
-    return formattedPrices;
-
-  } catch (error) {
-    console.error(`Error fetching prices for ${slug}:`, error);
-    return null;
-  }
-}

@@ -1,5 +1,7 @@
 import { Client, GatewayIntentBits, EmbedBuilder } from 'discord.js';
 import { config } from '../config.js';
+import { marketRegistry } from '../database/marketRegistry.js';
+import { clobListener } from '../clob/clobListener.js';
 
 let client = null;
 let channel = null;
@@ -17,7 +19,11 @@ export async function initializeDiscord() {
 
   try {
     client = new Client({
-      intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages],
+      intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent,
+      ],
     });
 
     await client.login(config.discordToken);
@@ -33,9 +39,82 @@ export async function initializeDiscord() {
       }
     });
 
+    client.on('messageCreate', async (message) => {
+      if (message.author.bot) return;
+
+      // --- !add <slug> ---
+      if (message.content.startsWith('!add ')) {
+        const slug = message.content.slice(5).trim();
+        if (!slug) return message.reply('❌ Please provide a market slug. Usage: `!add <slug>`');
+
+        await message.reply(`⏳ Adding market: \`${slug}\`...`);
+        try {
+          // Internal API call
+          const response = await fetch(`http://localhost:${config.port}/api/events/${slug}`, {
+            method: 'POST',
+            headers: { 'x-api-key': config.adminApiKey }
+          });
+          const data = await response.json();
+          if (response.ok && data.success) {
+            await message.reply(`✅ **Success!** Added ${data.addedCount} market(s).`);
+          } else {
+            await message.reply(`❌ **Error:** ${data.error || 'Unknown error'}`);
+          }
+        } catch (error) {
+          console.error('Command Error:', error);
+          await message.reply(`❌ **Internal Error:** ${error.message}`);
+        }
+      }
+
+      // --- !remove <slug> ---
+      else if (message.content.startsWith('!remove ')) {
+        const slug = message.content.slice(8).trim();
+        if (!slug) return message.reply('❌ Please provide a market slug. Usage: `!remove <slug>`');
+
+        await message.reply(`⏳ Removing market(s) for: \`${slug}\`...`);
+        try {
+          const response = await fetch(`http://localhost:${config.port}/api/events/${slug}`, {
+            method: 'DELETE',
+            headers: { 'x-api-key': config.adminApiKey }
+          });
+          const data = await response.json();
+          if (response.ok && data.success) {
+            await message.reply(`🗑️ **Success!** Removed ${data.removedCount} market(s).`);
+          } else {
+            await message.reply(`❌ **Error:** ${data.error || 'Unknown error'}`);
+          }
+        } catch (error) {
+          console.error('Command Error:', error);
+          await message.reply(`❌ **Internal Error:** ${error.message}`);
+        }
+      }
+
+      // --- !setthreshold <amount> ---
+      else if (message.content.startsWith('!setthreshold ')) {
+        const args = message.content.split(' ');
+        if (args.length < 2) return message.reply('❌ Usage: `!setthreshold <amount>`');
+
+        const amount = parseFloat(args[1]);
+        if (isNaN(amount) || amount < 0) {
+          return message.reply('❌ Invalid amount. Positive number required.');
+        }
+
+        try {
+          marketRegistry.setSetting('minAmountThreshold', amount);
+          clobListener.setThreshold(amount);
+
+          await message.reply(`✅ **Updated!** Min Trade Threshold set to **$${amount}**.`);
+        } catch (error) {
+          console.error('Threshold Error:', error);
+          await message.reply(`❌ **Error:** ${error.message}`);
+        }
+      }
+    });
+
     client.on('error', (error) => {
       console.error('Discord client error:', error);
     });
+
   } catch (error) {
     console.error('Failed to initialize Discord bot:', error.message);
   }
@@ -99,4 +178,3 @@ export async function cleanupDiscord() {
     channel = null;
   }
 }
-

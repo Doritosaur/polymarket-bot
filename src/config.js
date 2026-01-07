@@ -14,5 +14,6 @@ export const config = {
   clobWsUrl: process.env.CLOB_WS_URL || 'wss://ws-subscriptions-clob.polymarket.com/ws/market',
   redisHost: process.env.REDIS_HOST || 'localhost',
   redisPort: parseInt(process.env.REDIS_PORT || '6379'),
+  adminApiKey: process.env.ADMIN_API_KEY || 'changeme',
 };
 

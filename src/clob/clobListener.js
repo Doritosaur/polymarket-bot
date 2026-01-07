@@ -12,6 +12,7 @@ class ClobListener {
         this.reconnectAttempts = 0;
         this.shouldReconnect = true;
         this.reconnectTimeout = null;
+        this.minAmountThreshold = config.minAmountThreshold; // Default
     }
 
     async start(specifiedConditionId = null) {
@@ -20,6 +21,16 @@ class ClobListener {
         }
 
         console.log('Starting CLOB Listener...');
+        this.subscribedAssets.clear(); // Optimization: Clear old state to prevent memory leaks
+
+        // Load stored settings if available
+        const storedThreshold = marketRegistry.getSetting('minAmountThreshold');
+        if (storedThreshold) {
+            this.minAmountThreshold = parseFloat(storedThreshold);
+            console.log(`Loaded stored threshold: ${this.minAmountThreshold}`);
+        } else {
+            console.log(`Using config threshold: ${this.minAmountThreshold}`);
+        }
 
         let MARKETS_TO_MONITOR = [];
         if (specifiedConditionId) {
@@ -133,13 +144,18 @@ class ClobListener {
 
     attemptReconnect() {
         this.reconnectAttempts++;
-        const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 60000); // 1s, 2s, 4s... max 60s
+        const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 60000);
 
         console.log(`Attempting to reconnect in ${delay / 1000}s (Attempt ${this.reconnectAttempts})...`);
 
         this.reconnectTimeout = setTimeout(() => {
             this.start();
         }, delay);
+    }
+
+    setThreshold(val) {
+        this.minAmountThreshold = parseFloat(val);
+        console.log(`[CLOB] Threshold updated to ${this.minAmountThreshold}`);
     }
 
     handleMessage(msg) {
@@ -164,7 +180,7 @@ class ClobListener {
 
             console.log(`[TRADE] ${assetInfo.slug} (${assetInfo.outcome}) traded at ${price} (Size: ${size}, Side: ${update.side})`);
 
-            if (tradeValue > config.minAmountThreshold) {
+            if (tradeValue >= this.minAmountThreshold) {
                 addTradeToQueue({
                     type: 'trade',
                     tradeType: update.side,
@@ -191,6 +207,7 @@ class ClobListener {
         }
         clearInterval(this.pingInterval);
     }
+
     async initialize() {
         return this.start();
     }
@@ -228,6 +245,10 @@ class ClobListener {
         await this.restart();
     }
 
+    async removeMarkets(conditionIds) {
+        console.log(`[CLOB] Removing batch of ${conditionIds.length} markets. Restarting listener...`);
+        await this.restart();
+    }
 }
 
 export const clobListener = new ClobListener();

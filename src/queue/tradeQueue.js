@@ -1,7 +1,6 @@
 import { Queue, Worker } from 'bullmq';
 import { config } from '../config.js';
 import { notifyDiscord } from '../discord/notifier.js';
-import { fetchMarketOutcomePrices } from '../server.js';
 
 const connection = {
     host: config.redisHost,
@@ -15,10 +14,16 @@ export const tradeQueue = new Queue('trade-notification-queue', { connection });
 const worker = new Worker('trade-notification-queue', async (job) => {
     const tradeData = job.data;
 
-    // Fetch prices (with caching from server.js)
-    const marketPrices = await fetchMarketOutcomePrices(tradeData.marketName);
+    // Calculate probabilities based on traded price
+    // Polymarket prices sum to 1.0 (approx). P(Yes) + P(No) = 1.0
+    const tradedProb = (tradeData.price * 100).toFixed(4);
+    const inverseProb = ((1 - tradeData.price) * 100).toFixed(4);
 
-    // Update the data with fetched prices
+    const side = tradeData.outcome; // 'YES' or 'NO'
+    const otherSide = side === 'YES' ? 'NO' : 'YES';
+
+    const marketPrices = `**${side}:** ${tradedProb}% | **${otherSide}:** ${inverseProb}%`;
+
     const notificationData = {
         ...tradeData,
         marketPrices
