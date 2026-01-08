@@ -190,8 +190,12 @@ export function createServer() {
               const description = market.question || market.description || name;
               const clobTokenIds = market.clobTokenIds;
 
+              const image = market.image || data.image || null;
+              const endDate = market.endDate || data.endDate || null;
+              const groupDate = market.groupItemTitle || null;
+
               // Pass 'slug' (the event slug) as the 5th argument
-              marketRegistry.addMarket(market.conditionId, name, description, clobTokenIds, slug);
+              marketRegistry.addMarket(market.conditionId, name, description, clobTokenIds, slug, null, endDate, image, groupDate);
               addedCount++;
               addedMarkets.push(market.conditionId);
             } catch (err) {

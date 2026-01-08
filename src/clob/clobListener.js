@@ -77,12 +77,18 @@ class ClobListener {
                 this.subscribedAssets.set(yes, {
                     conditionId: market.condition_id,
                     slug: market.slug,
+                    question: market.description,
+                    endDate: market.end_date,
+                    image: market.image,
                     outcome: 'YES',
                     threshold: market.threshold
                 });
                 this.subscribedAssets.set(no, {
                     conditionId: market.condition_id,
                     slug: market.slug,
+                    question: market.description,
+                    endDate: market.end_date,
+                    image: market.image,
                     outcome: 'NO',
                     threshold: market.threshold
                 });

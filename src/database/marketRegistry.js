@@ -38,6 +38,8 @@ class MarketRegistry {
             const hasClobTokenIds = tableInfo.some(c => c.name === 'clob_token_ids');
             const hasEventSlug = tableInfo.some(c => c.name === 'event_slug');
             const hasThreshold = tableInfo.some(c => c.name === 'threshold');
+            const hasEndDate = tableInfo.some(c => c.name === 'end_date');
+            const hasImage = tableInfo.some(c => c.name === 'image');
 
             if (hasName && !hasSlug) {
                 console.log('Migrating database: renaming column name to slug...');
@@ -65,6 +67,25 @@ class MarketRegistry {
                     this.db.exec(`UPDATE markets SET threshold = ${globalDefault} WHERE threshold IS NULL`);
                 }
             }
+
+            if (!hasEndDate) {
+                console.log('Migrating database: adding column end_date...');
+                this.db.exec('ALTER TABLE markets ADD COLUMN end_date TEXT');
+            }
+
+            if (!hasImage) {
+                console.log('Migrating database: adding column image...');
+                this.db.exec('ALTER TABLE markets ADD COLUMN image TEXT');
+            }
+
+            // Check for group_date if we want to add it, strict requirements asked for end_date and compact layout
+            // Adding group_date just in case for sorting/context
+            const hasGroupDate = tableInfo.some(c => c.name === 'group_date');
+            if (!hasGroupDate) {
+                console.log('Migrating database: adding column group_date...');
+                this.db.exec('ALTER TABLE markets ADD COLUMN group_date TEXT');
+            }
+
 
             // Create indices AFTER ensuring columns exist
             this.db.exec(`
@@ -100,7 +121,7 @@ class MarketRegistry {
     }
 
 
-    addMarket(conditionId, slug = null, description = null, clobTokenIds = null, eventSlug = null, threshold = null) {
+    addMarket(conditionId, slug = null, description = null, clobTokenIds = null, eventSlug = null, threshold = null, endDate = null, image = null, groupDate = null) {
         try {
             const normalizedConditionId = this.normalizeConditionId(conditionId);
 
@@ -110,19 +131,22 @@ class MarketRegistry {
             }
 
             const stmt = this.db.prepare(`
-        INSERT INTO markets (condition_id, slug, description, clob_token_ids, event_slug, threshold, active)
-        VALUES (?, ?, ?, ?, ?, ?, 1)
+        INSERT INTO markets (condition_id, slug, description, clob_token_ids, event_slug, threshold, end_date, image, group_date, active)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
         ON CONFLICT(condition_id) DO UPDATE SET
           slug = COALESCE(excluded.slug, slug),
           description = COALESCE(excluded.description, description),
           clob_token_ids = COALESCE(excluded.clob_token_ids, clob_token_ids),
           event_slug = COALESCE(excluded.event_slug, event_slug),
           threshold = COALESCE(excluded.threshold, threshold),
+          end_date = COALESCE(excluded.end_date, end_date),
+          image = COALESCE(excluded.image, image),
+          group_date = COALESCE(excluded.group_date, group_date),
           active = 1,
           updated_at = CURRENT_TIMESTAMP
       `);
 
-            stmt.run(normalizedConditionId, slug, description, clobTokenIds, eventSlug, threshold);
+            stmt.run(normalizedConditionId, slug, description, clobTokenIds, eventSlug, threshold, endDate, image, groupDate);
             const id = this.db.lastInsertRowId;
 
             return {
@@ -133,6 +157,9 @@ class MarketRegistry {
                 clobTokenIds,
                 eventSlug,
                 threshold,
+                endDate,
+                image,
+                groupDate,
                 active: true
             };
         } catch (error) {
@@ -183,6 +210,14 @@ class MarketRegistry {
         return true;
     }
 
+    setEventThreshold(eventSlug, amount) {
+        const stmt = this.db.prepare(`
+            UPDATE markets SET threshold = ?, updated_at = CURRENT_TIMESTAMP WHERE event_slug = ? AND active = 1
+        `);
+        const result = stmt.run(amount, eventSlug);
+        return result.changes;
+    }
+
     // Fuzzy search helper for Discord command
     findMarketBySlugPartial(partialSlug) {
         const stmt = this.db.prepare(`
@@ -191,9 +226,16 @@ class MarketRegistry {
         return stmt.get(`%${partialSlug}%`);
     }
 
+    findDistinctEventsByMarketSlugPartial(partialSlug) {
+        const stmt = this.db.prepare(`
+            SELECT DISTINCT event_slug FROM markets WHERE slug LIKE ? AND active = 1
+        `);
+        return stmt.all(`%${partialSlug}%`);
+    }
+
     getActiveMarkets() {
         const stmt = this.db.prepare(`
-      SELECT id, condition_id, slug, description, clob_token_ids, event_slug, threshold, created_at, updated_at
+      SELECT id, condition_id, slug, description, clob_token_ids, event_slug, threshold, image, end_date, group_date, created_at, updated_at
       FROM markets
       WHERE active = 1
       ORDER BY created_at DESC
@@ -204,7 +246,7 @@ class MarketRegistry {
 
     getAllMarkets() {
         const stmt = this.db.prepare(`
-      SELECT id, condition_id, slug, description, clob_token_ids, event_slug, threshold, active, created_at, updated_at
+      SELECT id, condition_id, slug, description, clob_token_ids, event_slug, threshold, image, end_date, group_date, active, created_at, updated_at
       FROM markets
       ORDER BY created_at DESC
     `);
@@ -216,7 +258,7 @@ class MarketRegistry {
         const normalizedConditionId = this.normalizeConditionId(conditionId);
 
         const stmt = this.db.prepare(`
-      SELECT id, condition_id, slug, description, clob_token_ids, event_slug, threshold, active, created_at, updated_at
+      SELECT id, condition_id, slug, description, clob_token_ids, event_slug, threshold, image, end_date, group_date, active, created_at, updated_at
       FROM markets
       WHERE condition_id = ?
     `);
@@ -229,7 +271,7 @@ class MarketRegistry {
 
     getMarketsByEventSlug(eventSlug) {
         const stmt = this.db.prepare(`
-        SELECT id, condition_id, slug, description, clob_token_ids, event_slug, threshold, active, created_at, updated_at
+        SELECT id, condition_id, slug, description, clob_token_ids, event_slug, threshold, image, end_date, group_date, active, created_at, updated_at
         FROM markets
         WHERE event_slug = ? AND active = 1
       `);

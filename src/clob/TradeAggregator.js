@@ -34,7 +34,11 @@ export class TradeAggregator {
         } else {
             entry = {
                 data: {
+                    conditionId: assetInfo.conditionId,
                     marketName: assetInfo.slug,
+                    question: assetInfo.question,
+                    endDate: assetInfo.endDate,
+                    image: assetInfo.image,
                     outcome: assetInfo.outcome,
                     tradeType: side,
                     totalSize: size,
@@ -71,7 +75,11 @@ export class TradeAggregator {
             this.addTradeToQueue({
                 type: 'trade',
                 tradeType: d.tradeType,
+                conditionId: d.conditionId,
                 marketName: d.marketName,
+                question: d.question,
+                endDate: d.endDate,
+                image: d.image,
                 outcome: d.outcome,
                 amount: d.totalSize.toFixed(2),
                 price: avgPrice.toFixed(4),
