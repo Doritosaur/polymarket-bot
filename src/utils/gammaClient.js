@@ -13,17 +13,8 @@ export async function getMarketStats(slug) {
     }
 
     try {
-        // Query Gamma API by slug
-        // Endpoint: /markets/slug/:slug
-        const response = await fetch(`https://gamma-api.polymarket.com/markets/slug/${slug}`);
-
-        if (!response.ok) {
-            return null;
-        }
-
-        const data = await response.json();
-        // The /markets/slug/:slug endpoint returns a single market object
-        const market = data;
+        // Query Gamma API by slug via shared service
+        const market = await getMarket(slug);
 
         if (!market) return null;
 
@@ -46,5 +37,33 @@ export async function getMarketStats(slug) {
     } catch (error) {
         console.error(`[Gamma] Error fetching market stats:`, error.message);
         return null;
+    }
+}
+
+export async function getEvent(slug) {
+    try {
+        const response = await fetch(`${config.polymarket.gammaApiUrl}/events/slug/${slug}`);
+        if (response.status === 404) return null;
+        if (!response.ok) {
+            throw new Error(`Gamma API Error: ${response.status} ${response.statusText}`);
+        }
+        return await response.json();
+    } catch (error) {
+        console.error(`[Gamma] Error fetching event ${slug}:`, error.message);
+        throw error;
+    }
+}
+
+export async function getMarket(slug) {
+    try {
+        const response = await fetch(`${config.polymarket.gammaApiUrl}/markets/slug/${slug}`);
+        if (response.status === 404) return null;
+        if (!response.ok) {
+            throw new Error(`Gamma API Error: ${response.status} ${response.statusText}`);
+        }
+        return await response.json();
+    } catch (error) {
+        console.error(`[Gamma] Error fetching market ${slug}:`, error.message);
+        throw error;
     }
 }

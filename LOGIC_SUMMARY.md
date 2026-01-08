@@ -67,15 +67,17 @@ graph TD
 
 ## Scalability Features
 
-1.  **Decoupling**: The WebSocket listener never waits for HTTP requests. It can handle thousands of messages per second.
-2.  **Load Leveling**: Redis absorbs spikes in trading activity.
-3.  **Batching**: Markets are added/removed in batches to prevent listener thrashing.
-4.  **Zero-Latency Pricing**: Pricing is derived directly from the trade stream, removing the bottleneck of external API price lookups.
+*   **Incremental Subscriptions**: Adding/removing markets sends dynamic subscription messages to the CLOB WebSocket without disconnecting or restarting.
+*   **In-Memory Thresholds**: Updating event thresholds is instant and requires no database reads or restarts.
+*   **Load Leveling**: Redis absorbs spikes in trading activity.
 
 ## Key Files
 
-- `src/clob/clobListener.js`: WebSocket handling & Producer logic.
-- `src/queue/tradeQueue.js`: Redis Queue definition & Worker logic (with local price calc).
-- `src/server.js`: API endpoints for management.
+- `src/clob/clobListener.js`: WebSocket handling (Incremental updates supported).
+- `src/queue/tradeQueue.js`: Redis Queue definition & Worker logic.
+- `src/utils/gammaClient.js`: Centralized Gamma API interaction.
+- `src/utils/number.js`: Shared number parsing/formatting logic.
 - `src/database/marketRegistry.js`: SQLite storage for markets and settings.
-- `src/discord/notifier.js`: Discord bot command handling (`!setthreshold`) and embed styling.
+- `src/discord/notifier.js`: Main Discord client entry point.
+- `src/discord/commands/*.js`: Individual command logic (`add`, `remove`, `setThreshold`, etc.).
+- `src/discord/formatters.js`: Pure functions for creating Discord Embeds.

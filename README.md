@@ -16,13 +16,9 @@ Monitor Polymarket smart contracts for large transactions and get Discord notifi
 
 3. Configure `.env`:
    ```env
+   ```env
    PORT=3000
    
-   # RPC Configuration (Polygon)
-   RPC_URL=https://polygon-rpc.com
-   # Optional: Only needed if you want to use a specific WS endpoint. Defaults to RPC_URL with ws://
-   # RPC_WS_URL=wss://polygon-rpc.com
-
    # Polymarket CLOB Configuration
    CLOB_WS_URL=wss://ws-subscriptions-clob.polymarket.com/ws/market
    
@@ -52,10 +48,14 @@ Manage the bot directly from Discord:
 
 *   **`!add <event_slug>`**: Add all markets for a specific Polymarket event.
     *   *Example*: `!add presidential-election-2024`
-*   **`!remove <event_slug>`**: Remove all monitored markets for an event.
-    *   *Example*: `!remove presidential-election-2024`
-*   **`!setthreshold <amount>`**: Dynamically update the minimum trade amount ($) for notifications.
+*   **`!remove <market_slug_fragment>`**: Remove single market by partial slug match.
+    *   *Example*: `!remove trump`
+*   **`!setthreshold <amount>`**: Dynamically update the global minimum trade amount ($).
     *   *Example*: `!setthreshold 5000`
+*   **`!setevent <event_slug_or_fragment> <amount>`**: Set a custom threshold for a specific event (overrides global).
+    *   *Example*: `!setevent israel-strikes 100`
+*   **`!event <event_slug>`**: View real-time stats (prices, volume) for an event.
+    *   *Example*: `!event presidential-election-2024`
 
 ## API
 

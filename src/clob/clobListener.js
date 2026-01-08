@@ -22,7 +22,11 @@ class ClobListener {
         }
 
         console.log('Starting CLOB Listener...');
-        this.subscribedAssets.clear();
+
+        // Only clear if fully restarting
+        if (!this.ws) {
+            this.subscribedAssets.clear();
+        }
 
         // Sync global threshold from registry to aggregator
         const storedThreshold = marketRegistry.getSetting('minAmountThreshold');
@@ -31,87 +35,67 @@ class ClobListener {
             console.log(`Loaded stored threshold: ${storedThreshold}`);
         }
 
-        let MARKETS_TO_MONITOR = [];
+        let marketsToLoad = [];
         if (specifiedConditionId) {
             const market = marketRegistry.getMarket(specifiedConditionId);
-            if (market) {
-                MARKETS_TO_MONITOR.push(market);
-            } else {
-                console.error(`Market ${specifiedConditionId} not found in registry.`);
-                return;
-            }
+            if (market) marketsToLoad.push(market);
         } else {
-            MARKETS_TO_MONITOR = marketRegistry.getActiveMarkets();
+            // Only load all active if we are starting fresh or don't have them
+            if (this.subscribedAssets.size === 0) {
+                marketsToLoad = marketRegistry.getActiveMarkets();
+            }
         }
 
-        if (MARKETS_TO_MONITOR.length === 0) {
+        // Register them to the map
+        const newAssetIds = this.registerMarkets(marketsToLoad);
+
+        // If we're just starting, we need to collect ALL assets from the map, 
+        // because we might have skipped loading usage if map wasn't empty? 
+        // Actually, let's keep it simple: Start loads everything from DB if fresh.
+
+        let allAssets = [];
+        if (this.subscribedAssets.size === 0 && marketsToLoad.length > 0) {
+            // We just registered them
+            allAssets = newAssetIds;
+        } else {
+            // We might be reconnecting, gather all
+            allAssets = Array.from(this.subscribedAssets.keys());
+        }
+
+        // If we are already connected, we shouldn't be calling start() unless it's a full restart.
+        // But if we are, we proceed to connect.
+
+        if (allAssets.length === 0 && this.subscribedAssets.size === 0) {
             console.log('No active markets to track.');
             return;
         }
-        const assetIdsToSubscribe = [];
 
-        for (const market of MARKETS_TO_MONITOR) {
-            try {
-                let yes, no;
+        console.log(`Prepared to track ${this.subscribedAssets.size} assets.`);
 
-                if (market.clob_token_ids) {
-                    try {
-                        const tokenIds = JSON.parse(market.clob_token_ids);
-                        if (Array.isArray(tokenIds) && tokenIds.length >= 2) {
-                            yes = tokenIds[0].toString();
-                            no = tokenIds[1].toString();
-                        }
-                    } catch (e) {
-                        console.warn(`Failed to parse clob_token_ids for ${market.condition_id}, falling back to derivation.`);
-                    }
-                }
-
-                if (!yes || !no) {
-                    console.warn(`Market ${market.condition_id} missing clob_token_ids, skipping subscription.`);
-                    continue;
-                }
-
-                assetIdsToSubscribe.push(yes);
-                assetIdsToSubscribe.push(no);
-
-                this.subscribedAssets.set(yes, {
-                    conditionId: market.condition_id,
-                    slug: market.slug,
-                    question: market.description,
-                    endDate: market.end_date,
-                    image: market.image,
-                    outcome: 'YES',
-                    threshold: market.threshold
-                });
-                this.subscribedAssets.set(no, {
-                    conditionId: market.condition_id,
-                    slug: market.slug,
-                    question: market.description,
-                    endDate: market.end_date,
-                    image: market.image,
-                    outcome: 'NO',
-                    threshold: market.threshold
-                });
-            } catch (error) {
-                console.error(`Failed to derive IDs for ${market.condition_id}:`, error);
-            }
+        if (this.ws) {
+            console.warn('WS already open, skipping new connection code in start(). use addMarket instead.');
+            return;
         }
 
-        console.log(`Prepared to track ${this.subscribedAssets.size} assets from ${MARKETS_TO_MONITOR.length} markets.`);
+        this.connect(allAssets);
+    }
 
+    connect(assetIds) {
         this.ws = new WebSocket(WS_URL);
 
         this.ws.onopen = () => {
             console.log('Connected to Polymarket CLOB WebSocket');
             this.reconnectAttempts = 0;
 
-            const subscribeMsg = {
-                type: "market",
-                assets_ids: assetIdsToSubscribe
-            };
+            if (assetIds.length > 0) {
+                const subscribeMsg = {
+                    type: "market",
+                    assets_ids: assetIds
+                };
+                this.ws.send(JSON.stringify(subscribeMsg));
+                console.log(`Sent subscription request for ${assetIds.length} assets`);
+            }
 
-            this.ws.send(JSON.stringify(subscribeMsg));
-            console.log('Sent subscription request');
             this.pingInterval = setInterval(() => {
                 if (this.ws.readyState === WebSocket.OPEN) {
                     this.ws.send(JSON.stringify({ type: "ping" }));
@@ -122,15 +106,12 @@ class ClobListener {
         this.ws.onmessage = (event) => {
             try {
                 if (typeof event.data === 'string' && !event.data.trim().startsWith('{') && !event.data.trim().startsWith('[')) {
-                    console.warn('Received non-JSON message from CLOB:', event.data);
                     return;
                 }
-
                 const msg = JSON.parse(event.data);
                 this.handleMessage(msg);
             } catch (error) {
                 console.error('Error handling WebSocket message:', error);
-                console.debug('Raw message content:', event.data);
             }
         };
 
@@ -149,12 +130,52 @@ class ClobListener {
         };
     }
 
+    // Helper to parse markets and update local map. Returns array of NEW asset IDs.
+    registerMarkets(markets) {
+        const newAssetIds = [];
+        for (const market of markets) {
+            try {
+                let yes, no;
+                if (market.clob_token_ids) {
+                    try {
+                        const tokenIds = JSON.parse(market.clob_token_ids);
+                        if (Array.isArray(tokenIds) && tokenIds.length >= 2) {
+                            yes = tokenIds[0].toString();
+                            no = tokenIds[1].toString();
+                        }
+                    } catch (e) { /* ignore */ }
+                }
+
+                if (!yes || !no) continue;
+
+                // Add to map
+                const addAsset = (id, outcome) => {
+                    this.subscribedAssets.set(id, {
+                        conditionId: market.condition_id,
+                        slug: market.slug,
+                        question: market.description,
+                        endDate: market.end_date,
+                        image: market.image,
+                        outcome,
+                        threshold: market.threshold
+                    });
+                    newAssetIds.push(id);
+                };
+
+                addAsset(yes, 'YES');
+                addAsset(no, 'NO');
+
+            } catch (error) {
+                console.error(`Failed to register market ${market.condition_id}:`, error);
+            }
+        }
+        return newAssetIds;
+    }
+
     attemptReconnect() {
         this.reconnectAttempts++;
         const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 60000);
-
-        console.log(`Attempting to reconnect in ${delay / 1000}s (Attempt ${this.reconnectAttempts})...`);
-
+        console.log(`Reconnecting in ${delay / 1000}s...`);
         this.reconnectTimeout = setTimeout(() => {
             this.start();
         }, delay);
@@ -166,9 +187,7 @@ class ClobListener {
 
     handleMessage(msg) {
         if (Array.isArray(msg)) {
-            for (const update of msg) {
-                this.processUpdate(update);
-            }
+            for (const update of msg) this.processUpdate(update);
         } else {
             this.processUpdate(msg);
         }
@@ -179,7 +198,7 @@ class ClobListener {
         if (update.type === "pong") return;
 
         const assetInfo = this.subscribedAssets.get(update.asset_id);
-        if (!assetInfo) return;
+        if (!assetInfo) return; // Ignore if not tracked (e.g. removed market)
 
         if (update.event_type === "last_trade_price") {
             this.aggregator.processTrade({
@@ -198,13 +217,10 @@ class ClobListener {
             clearTimeout(this.reconnectTimeout);
             this.reconnectTimeout = null;
         }
-
-        if (clearPending) {
-            this.aggregator.clearPending();
-        }
-
+        if (clearPending) this.aggregator.clearPending();
         if (this.ws) {
             this.ws.close();
+            this.ws = null;
         }
         clearInterval(this.pingInterval);
     }
@@ -222,33 +238,110 @@ class ClobListener {
         return this.stop(true);
     }
 
-    getActiveListenersCount() {
-        return (this.ws && this.ws.readyState === WebSocket.OPEN) ? 1 : 0;
-    }
-
-    getTrackedMarketsCount() {
-        const conditions = new Set([...this.subscribedAssets.values()].map(a => a.conditionId));
-        return conditions.size;
-    }
+    // --- Optimization: Incremental Updates ---
 
     async addMarket(conditionId, slug, description, clobTokenIds = null) {
-        console.log(`[CLOB] New market added (${slug}). Restarting listener to subscribe...`);
-        await this.restart();
+        console.log(`[CLOB] Adding market ${slug} incrementally...`);
+        // 1. Fetch full details from DB (to get everything)
+        const market = marketRegistry.getMarket(conditionId);
+        if (!market) return;
+
+        // 2. Register (Update Map)
+        const newIds = this.registerMarkets([market]);
+
+        // 3. Send Subscribe Message if connected
+        if (this.ws && this.ws.readyState === WebSocket.OPEN && newIds.length > 0) {
+            this.ws.send(JSON.stringify({
+                type: "market",
+                assets_ids: newIds
+            }));
+            console.log(`[CLOB] Sent incremental subscription for ${newIds.length} assets.`);
+        } else if (!this.ws) {
+            // If not connected, start() will pick it up from DB/Map
+            await this.start();
+        }
     }
 
     async addMarkets(markets) {
-        console.log(`[CLOB] Adding batch of ${markets.length} markets. Restarting listener...`);
-        await this.restart();
+        console.log(`[CLOB] Adding batch of ${markets.length} markets incrementally...`);
+        // 1. Fetch full details from DB for all
+        // Note: registerMarkets expects market objects, not just IDs. 
+        // Assuming 'markets' passed here are full objects or we fetch them. 
+        // Looking at usage in server.js, it might be passing minimal info. 
+        // For safety, let's just use what's passed if it has data, or re-fetch.
+        // Actually, let's assume valid market objects are passed or we iterate IDs.
+        // To be safe/consistent with registry cache:
+        const fullMarkets = [];
+        for (const m of markets) {
+            const fresh = marketRegistry.getMarket(m.condition_id || m); // handle object or ID
+            if (fresh) fullMarkets.push(fresh);
+        }
+
+        const newIds = this.registerMarkets(fullMarkets);
+
+        if (this.ws && this.ws.readyState === WebSocket.OPEN && newIds.length > 0) {
+            this.ws.send(JSON.stringify({
+                type: "market",
+                assets_ids: newIds
+            }));
+            console.log(`[CLOB] Sent incremental batch subscription for ${newIds.length} assets.`);
+        }
     }
 
     async removeMarket(conditionId) {
-        console.log(`[CLOB] Market removed (${conditionId}). Restarting listener to update subscription...`);
-        await this.restart();
+        console.log(`[CLOB] Removing market ${conditionId} locally (Lazy Unsubscribe)...`);
+        // We don't send an Unsubscribe message (Polymarket doesn't strictly document "unsubscribe" for public data stream easily, 
+        // or we just rely on filtering).
+        // Simply removing from 'subscribedAssets' map ensures 'processUpdate' ignores future messages.
+
+        // We need to find the asset IDs for this conditionId to remove them.
+        for (const [assetId, info] of this.subscribedAssets.entries()) {
+            if (info.conditionId === conditionId) {
+                this.subscribedAssets.delete(assetId);
+            }
+        }
     }
 
     async removeMarkets(conditionIds) {
-        console.log(`[CLOB] Removing batch of ${conditionIds.length} markets. Restarting listener...`);
-        await this.restart();
+        console.log(`[CLOB] Removing ${conditionIds.length} markets locally...`);
+        const idsToRemove = new Set(conditionIds);
+        for (const [assetId, info] of this.subscribedAssets.entries()) {
+            if (idsToRemove.has(info.conditionId)) {
+                this.subscribedAssets.delete(assetId);
+            }
+        }
+    }
+
+    // Update thresholds in-memory for an event (optimization to avoid restart)
+    updateEventThreshold(eventSlug, newThreshold) {
+        let count = 0;
+        for (const [assetId, info] of this.subscribedAssets.entries()) {
+            if (info.slug === eventSlug || info.eventSlug === eventSlug || (marketRegistry.getMarketsByEventSlug(eventSlug).some(m => m.condition_id === info.conditionId))) {
+                // The mapping in subscribedAssets uses info.slug which refers to the MARKET slug? 
+                // Let's check registerMarkets: slug: market.slug. 
+                // We don't store event_slug in subscribedAssets info! We need to fix that first or look it up.
+                // Actually registerMarkets stores: slug: market.slug.
+                // We should probably check if we can easily match.
+            }
+        }
+        // Okay, simpler: iterate and check if the market belongs to the event. 
+        // Or better: pass the list of conditionIds that were updated?
+        // setEvent.js calls marketRegistry.setEventThreshold(eventSlug, amount).
+        // That updates DB.
+        // To be safe and fast:
+        // 1. Get all markets for the event from registry.
+        // 2. For each market, update its assets in the map.
+
+        const markets = marketRegistry.getMarketsByEventSlug(eventSlug);
+        const conditionIds = new Set(markets.map(m => m.condition_id));
+
+        for (const [assetId, info] of this.subscribedAssets.entries()) {
+            if (conditionIds.has(info.conditionId)) {
+                info.threshold = newThreshold;
+                count++;
+            }
+        }
+        console.log(`[CLOB] Updated threshold for ${count} assets in memory.`);
     }
 }
 

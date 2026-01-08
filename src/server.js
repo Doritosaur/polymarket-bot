@@ -2,6 +2,7 @@ import express from 'express';
 import { marketRegistry } from './database/marketRegistry.js';
 import { clobListener } from './clob/clobListener.js';
 import { config } from './config.js';
+import { getEvent } from './utils/gammaClient.js';
 
 export function createServer() {
   const app = express();
@@ -168,16 +169,14 @@ export function createServer() {
         });
       }
 
-      const response = await fetch(`https://gamma-api.polymarket.com/events/slug/${slug}`);
+      const data = await getEvent(slug);
 
-      if (!response.ok) {
-        return res.status(response.status).json({
+      if (!data) {
+        return res.status(404).json({
           success: false,
-          error: `Gamma API returned ${response.status}: ${response.statusText}`
+          error: `Event '${slug}' not found`
         });
       }
-
-      const data = await response.json();
 
       let addedCount = 0;
       const addedMarkets = [];
