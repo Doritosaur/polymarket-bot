@@ -13,4 +13,4 @@ COPY .env .env
 EXPOSE 3000
 
 # Start the bot
-CMD ["bun", "run", "src/index.js"]
+CMD ["bun", "run", "start:docker"]

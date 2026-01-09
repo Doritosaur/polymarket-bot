@@ -38,3 +38,25 @@ export function formatOutcomePrices(prices) {
     const noCents = Math.round(no * 100);
     return `Y: ${yesCents}¢ | N: ${noCents}¢`;
 }
+
+/**
+ * Extracts the slug from a URL or returns the input if it's already a slug.
+ * Handles:
+ * - "will-trump-win" -> "will-trump-win"
+ * - "https://polymarket.com/event/will-trump-win" -> "will-trump-win"
+ * - "https://polymarket.com/market/will-trump-win?param=1" -> "will-trump-win"
+ * @param {string} input 
+ * @returns {string}
+ */
+export function extractSlug(input) {
+    if (!input) return '';
+    try {
+        const url = new URL(input);
+        // Path matches: /event/SLUG or /market/SLUG
+        const segments = url.pathname.split('/').filter(s => s.length > 0);
+        return segments[segments.length - 1];
+    } catch (e) {
+        // Not a URL, treat as raw slug
+        return input.trim();
+    }
+}

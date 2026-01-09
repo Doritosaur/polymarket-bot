@@ -5,24 +5,26 @@ import { createTradeEmbed } from './formatters.js';
 
 import * as addCmd from './commands/add.js';
 import * as removeCmd from './commands/remove.js';
-import * as setThresholdCmd from './commands/setThreshold.js';
-import * as setEventCmd from './commands/setEvent.js';
 import * as eventCmd from './commands/event.js';
 import * as searchCmd from './commands/search.js';
+import * as configCmd from './commands/config.js';
 
 let client = null;
 let channel = null;
 
-export const commandHandlers = {
-  [addCmd.name]: addCmd.execute,
-  [removeCmd.name]: removeCmd.execute,
-  [setThresholdCmd.name]: setThresholdCmd.execute,
-  [setEventCmd.name]: setEventCmd.execute,
-  [eventCmd.name]: eventCmd.execute,
-  [searchCmd.name]: searchCmd.execute
-};
+let commandHandlers = {};
 
 export async function initializeDiscord() {
+  // Initialize command handlers here to avoid circular dependency issues
+  // (notifier -> configCmd -> clobListener -> notifier)
+  commandHandlers = {
+    [addCmd.data.name]: addCmd.execute,
+    [removeCmd.data.name]: removeCmd.execute,
+    [eventCmd.data.name]: eventCmd.execute,
+    [searchCmd.data.name]: searchCmd.execute,
+    [configCmd.data.name]: configCmd.execute
+  };
+
   if (!config.discordToken || !config.discordChannelId) {
     console.warn('Discord token/channel not configured. Notifications disabled.');
     return;
@@ -51,19 +53,21 @@ export async function initializeDiscord() {
       else console.log(`Connected to Discord channel: ${channel.name}`);
     });
 
-    client.on('messageCreate', async (message) => {
-      if (message.author.bot) return;
+    client.on('interactionCreate', async (interaction) => {
+      if (!interaction.isChatInputCommand()) return;
 
-      const args = message.content.trim().split(/\s+/);
-      const commandName = args.shift();
+      const handler = commandHandlers[interaction.commandName];
 
-      const handler = commandHandlers[commandName];
       if (handler) {
         try {
-          await handler(message, args);
+          await handler(interaction);
         } catch (error) {
-          console.error(`Error executing ${commandName}:`, error);
-          await message.reply(`❌ **Error:** ${error.message}`);
+          console.error(`Error executing ${interaction.commandName}:`, error);
+          if (interaction.replied || interaction.deferred) {
+            await interaction.followUp({ content: `❌ **Error:** ${error.message}`, ephemeral: true });
+          } else {
+            await interaction.reply({ content: `❌ **Error:** ${error.message}`, ephemeral: true });
+          }
         }
       }
     });
@@ -81,13 +85,7 @@ export async function notifyDiscord(data) {
   if (!client || !channel) return;
 
   try {
-    let stats = null;
-    if (data.marketName) {
-      stats = await getMarketStats(data.marketName);
-    }
-
-    const embedData = { ...data, ...stats };
-    const embed = createTradeEmbed(embedData);
+    const embed = createTradeEmbed(data);
     await channel.send({ embeds: [embed] });
   } catch (error) {
     console.error('Failed to send Discord notification:', error.message);

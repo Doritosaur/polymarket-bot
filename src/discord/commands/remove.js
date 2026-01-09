@@ -1,22 +1,35 @@
+import { SlashCommandBuilder } from 'discord.js';
 import { config } from '../../config.js';
+import { extractSlug } from '../../utils/formatting.js';
 
-export const name = '!remove';
-export const description = 'Remove a market by slug';
+export const data = new SlashCommandBuilder()
+    .setName('remove')
+    .setDescription('Remove a market by slug or URL')
+    .addStringOption(option =>
+        option.setName('slug')
+            .setDescription('The market slug or URL')
+            .setRequired(true));
 
-export async function execute(message, args) {
-    const slug = args.join(' ').trim();
-    if (!slug) return message.reply('❌ Please provide a market slug. Usage: `!remove <slug>`');
+export async function execute(interaction) {
+    const input = interaction.options.getString('slug').trim();
+    const slug = extractSlug(input);
 
-    await message.reply(`⏳ Removing market(s) for: \`${slug}\`...`);
-    const response = await fetch(`http://localhost:${config.port}/api/events/${slug}`, {
-        method: 'DELETE',
-        headers: { 'x-api-key': config.adminApiKey }
-    });
-    const data = await response.json();
+    await interaction.deferReply();
+    await interaction.editReply(`⏳ Removing market(s) for: \`${slug}\`...`);
 
-    if (response.ok && data.success) {
-        await message.reply(`🗑️ **Success!** Removed ${data.removedCount} market(s).`);
-    } else {
-        throw new Error(data.error || 'Unknown error');
+    try {
+        const response = await fetch(`http://localhost:${config.port}/api/events/${slug}`, {
+            method: 'DELETE',
+            headers: { 'x-api-key': config.adminApiKey }
+        });
+        const data = await response.json();
+
+        if (response.ok && data.success) {
+            await interaction.editReply(`🗑️ **Success!** Removed ${data.removedCount} market(s).`);
+        } else {
+            throw new Error(data.error || 'Unknown error');
+        }
+    } catch (error) {
+        await interaction.editReply(`❌ **Error:** ${error.message}`);
     }
 }

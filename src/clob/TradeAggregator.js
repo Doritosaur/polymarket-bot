@@ -10,6 +10,9 @@ export class TradeAggregator {
 
         this.pendingAggregations = new Map();
         this.AGGREGATION_WINDOW_MS = 50;
+
+        // Single tick loop for efficient aggregation
+        this.tickInterval = setInterval(() => this.tick(), 50);
     }
 
     setGlobalThreshold(val) {
@@ -25,48 +28,47 @@ export class TradeAggregator {
         let entry = this.pendingAggregations.get(key);
 
         if (entry) {
-            clearTimeout(entry.timeout);
-
-            entry.data.totalSize += size;
-            entry.data.totalValue += tradeValue;
-            entry.data.vwapNumerator += (price * size);
-            entry.data.count += 1;
+            entry.totalSize += size;
+            entry.totalValue += tradeValue;
+            entry.vwapNumerator += (price * size);
+            entry.count += 1;
+            entry.lastUpdate = Date.now();
         } else {
             entry = {
-                data: {
-                    conditionId: assetInfo.conditionId,
-                    marketName: assetInfo.slug,
-                    question: assetInfo.question,
-                    endDate: assetInfo.endDate,
-                    image: assetInfo.image,
-                    outcome: assetInfo.outcome,
-                    tradeType: side,
-                    totalSize: size,
-                    totalValue: tradeValue,
-                    vwapNumerator: (price * size),
-                    count: 1,
-                    timestamp: timestamp ? parseInt(timestamp) : Date.now(),
-                    threshold: assetInfo.threshold
-                }
+                conditionId: assetInfo.conditionId,
+                marketName: assetInfo.slug,
+                question: assetInfo.question,
+                endDate: assetInfo.endDate,
+                image: assetInfo.image,
+                outcome: assetInfo.outcome,
+                tradeType: side,
+                totalSize: size,
+                totalValue: tradeValue,
+                vwapNumerator: (price * size),
+                count: 1,
+                timestamp: timestamp ? parseInt(timestamp) : Date.now(),
+                threshold: assetInfo.threshold,
+                firstUpdate: Date.now(),
+                lastUpdate: Date.now()
             };
+            this.pendingAggregations.set(key, entry);
         }
-
-        entry.timeout = setTimeout(() => {
-            this.flushAggregation(key);
-        }, this.AGGREGATION_WINDOW_MS);
-
-        this.pendingAggregations.set(key, entry);
     }
 
-    flushAggregation(key) {
-        const entry = this.pendingAggregations.get(key);
-        if (!entry) return;
+    tick() {
+        const now = Date.now();
+        for (const [key, entry] of this.pendingAggregations) {
+            // Flush if window has passed since FIRST trade in this batch
+            if (now - entry.firstUpdate >= this.AGGREGATION_WINDOW_MS) {
+                this.flushAggregation(key, entry);
+            }
+        }
+    }
 
+    flushAggregation(key, d) {
         this.pendingAggregations.delete(key);
 
-        const d = entry.data;
         const avgPrice = d.vwapNumerator / d.totalSize;
-
         const thresholdToUse = d.threshold || this.minAmountThreshold;
 
         if (d.totalValue >= thresholdToUse) {
@@ -92,9 +94,10 @@ export class TradeAggregator {
     }
 
     clearPending() {
-        for (const [key, entry] of this.pendingAggregations) {
-            clearTimeout(entry.timeout);
-        }
         this.pendingAggregations.clear();
+        if (this.tickInterval) {
+            clearInterval(this.tickInterval);
+            this.tickInterval = null;
+        }
     }
 }

@@ -1,13 +1,21 @@
+import { SlashCommandBuilder } from 'discord.js';
 import { marketRegistry } from '../../database/marketRegistry.js';
 import { getEvent } from '../../utils/gammaClient.js';
 import { createEventEmbed } from '../formatters.js';
+import { extractSlug } from '../../utils/formatting.js';
 
-export const name = '!event';
-export const description = 'Get detailed info and prices for an event';
+export const data = new SlashCommandBuilder()
+    .setName('event')
+    .setDescription('Get detailed info and prices for an event (supports URL)')
+    .addStringOption(option =>
+        option.setName('slug')
+            .setDescription('Event slug, URL, or partial market slug')
+            .setRequired(true));
 
-export async function execute(message, args) {
-    if (args.length < 1) return message.reply('❌ Usage: `!event <slug_fragment>`');
-    const slugPart = args[0];
+export async function execute(interaction) {
+    const input = interaction.options.getString('slug');
+    const slugPart = extractSlug(input);
+    await interaction.deferReply();
 
     let eventSlugToUse = null;
 
@@ -21,11 +29,10 @@ export async function execute(message, args) {
 
         if (matchedEvents.length === 0) {
             // Fallback 3: User might be trying to fetch an event we DON'T track yet.
-            // We'll allow it, passing the raw slug to Gamma to see if it exists.
             eventSlugToUse = slugPart;
         } else if (matchedEvents.length > 1) {
             const matches = matchedEvents.map(e => `\`${e.event_slug}\``).join(', ');
-            return message.reply(`⚠️ **Ambiguous Match:** "${slugPart}" matches markets in multiple events: ${matches}.\nPlease be more specific or use the exact Event Slug.`);
+            return interaction.editReply(`⚠️ **Ambiguous Match:** "${slugPart}" matches markets in multiple events: ${matches}.\nPlease be more specific or use the exact Event Slug.`);
         } else {
             eventSlugToUse = matchedEvents[0].event_slug;
         }
@@ -33,20 +40,20 @@ export async function execute(message, args) {
 
     try {
         const data = await getEvent(eventSlugToUse);
-        if (!data) return message.reply(`❌ Event \`${eventSlugToUse}\` not found on Polymarket.`);
+        if (!data) return interaction.editReply(`❌ Event \`${eventSlugToUse}\` not found on Polymarket.`);
 
         const markets = data.markets || [];
-        if (markets.length === 0) return message.reply(`⚠️ Event found but has no markets.`);
+        if (markets.length === 0) return interaction.editReply(`⚠️ Event found but has no markets.`);
 
         const embed = createEventEmbed(data);
         if (markets.length > 25) {
             embed.setFooter({ text: `Showing top 25 of ${markets.length} markets. | Event: ${data.slug}` });
         }
 
-        await message.reply({ embeds: [embed] });
+        await interaction.editReply({ embeds: [embed] });
 
     } catch (error) {
         console.error(error);
-        message.reply(`❌ Error fetching event: ${error.message}`);
+        interaction.editReply(`❌ Error fetching event: ${error.message}`);
     }
 }

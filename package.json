@@ -6,7 +6,9 @@
   "type": "module",
   "scripts": {
     "start": "bun run src/index.js",
-    "dev": "bun --watch src/index.js"
+    "start:docker": "bun run deploy && bun run start",
+    "dev": "bun --watch src/index.js",
+    "deploy": "bun run src/discord/deploy-commands.js"
   },
   "keywords": [],
   "author": "",

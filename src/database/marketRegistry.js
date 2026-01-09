@@ -7,7 +7,6 @@ class MarketRegistry {
         const dbPath = join(import.meta.dir, '../..', 'data', 'markets.db');
         this.db = new Database(dbPath);
         this.db.exec("PRAGMA journal_mode = WAL;");
-        this.db.exec("PRAGMA journal_mode = WAL;");
         this.fuseCache = null;
         this.initializeSchema();
     }
@@ -102,6 +101,7 @@ class MarketRegistry {
               CREATE INDEX IF NOT EXISTS idx_markets_active ON markets(active);
               CREATE INDEX IF NOT EXISTS idx_markets_watched ON markets(watched);
               CREATE INDEX IF NOT EXISTS idx_markets_event_slug ON markets(event_slug);
+              CREATE INDEX IF NOT EXISTS idx_markets_created_at ON markets(created_at);
             `);
 
         } catch (err) {
@@ -156,7 +156,6 @@ class MarketRegistry {
       `);
 
             stmt.run(normalizedConditionId, slug, description, clobTokenIds, eventSlug, threshold, endDate, image, groupDate);
-            stmt.run(normalizedConditionId, slug, description, clobTokenIds, eventSlug, threshold, endDate, image, groupDate);
             const id = this.db.lastInsertRowId;
             this.fuseCache = null; // Invalidate cache
 
@@ -210,7 +209,7 @@ class MarketRegistry {
                         clob_token_ids = COALESCE($clobTokenIds, clob_token_ids),
                         event_slug = COALESCE(excluded.event_slug, event_slug),
                         threshold = COALESCE($threshold, threshold),
-                        end_date = COALESCE($endDate, end_date),
+                        end_date = COALESCE(excluded.end_date, end_date),
                         image = COALESCE($image, image),
                         group_date = COALESCE(excluded.group_date, group_date),
                         active = 1,
@@ -271,7 +270,7 @@ class MarketRegistry {
         if (result.changes === 0) {
             throw new Error(`Market ${conditionId} not found`);
         }
-        this.fuseCache = null;
+        this.fuseCache = null; // Invalidate cache
 
         return true;
     }

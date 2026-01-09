@@ -6,6 +6,8 @@ export const config = {
   port: process.env.PORT || 3000,
   minAmountThreshold: parseFloat(process.env.MIN_AMOUNT_THRESHOLD || '1000'),
   discordToken: process.env.DISCORD_TOKEN || '',
+  discordClientId: process.env.DISCORD_CLIENT_ID || '',
+  discordGuildId: process.env.DISCORD_GUILD_ID || '',
   discordChannelId: process.env.DISCORD_CHANNEL_ID || '',
   clobWsUrl: process.env.CLOB_WS_URL || 'wss://ws-subscriptions-clob.polymarket.com/ws/market',
   redisHost: process.env.REDIS_HOST || 'localhost',
