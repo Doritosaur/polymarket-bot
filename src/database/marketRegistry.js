@@ -7,6 +7,8 @@ class MarketRegistry {
         const dbPath = join(import.meta.dir, '../..', 'data', 'markets.db');
         this.db = new Database(dbPath);
         this.db.exec("PRAGMA journal_mode = WAL;");
+        this.db.exec("PRAGMA journal_mode = WAL;");
+        this.fuseCache = null;
         this.initializeSchema();
     }
 
@@ -154,7 +156,9 @@ class MarketRegistry {
       `);
 
             stmt.run(normalizedConditionId, slug, description, clobTokenIds, eventSlug, threshold, endDate, image, groupDate);
+            stmt.run(normalizedConditionId, slug, description, clobTokenIds, eventSlug, threshold, endDate, image, groupDate);
             const id = this.db.lastInsertRowId;
+            this.fuseCache = null; // Invalidate cache
 
             return {
                 id: Number(id),
@@ -183,6 +187,7 @@ class MarketRegistry {
         const defaultThreshold = globalDefaultThreshold ? parseFloat(globalDefaultThreshold) : null;
 
         const upsertTransaction = this.db.transaction((marketsToUpsert) => {
+            this.fuseCache = null; // Invalidate cache
             if (options.fullSync) {
                 this.db.exec('UPDATE markets SET active = 0 WHERE active = 1');
             }
@@ -266,6 +271,7 @@ class MarketRegistry {
         if (result.changes === 0) {
             throw new Error(`Market ${conditionId} not found`);
         }
+        this.fuseCache = null;
 
         return true;
     }
@@ -364,30 +370,34 @@ class MarketRegistry {
     }
 
     searchMarkets(query, limit = 20) {
-        // Fetch all active markets for fuzzy search
-        // We select only necessary fields to keep memory usage low
-        const stmt = this.db.prepare(`
-            SELECT id, condition_id, slug, description, event_slug, threshold, active, watched, image, group_date
-            FROM markets
-            WHERE active = 1
-        `);
-        const allMarkets = stmt.all();
+        // Cache the Fuse index to avoid rebuilding it on every search
+        if (!this.fuseCache) {
+            // Fetch all active markets for fuzzy search
+            // We select only necessary fields to keep memory usage low
+            const stmt = this.db.prepare(`
+                SELECT id, condition_id, slug, description, event_slug, threshold, active, watched, image, group_date
+                FROM markets
+                WHERE active = 1
+            `);
+            const allMarkets = stmt.all();
 
-        if (allMarkets.length === 0) return [];
+            if (allMarkets.length === 0) return [];
 
-        const fuseOptions = {
-            keys: [
-                { name: 'description', weight: 0.5 },
-                { name: 'slug', weight: 0.3 },
-                { name: 'event_slug', weight: 0.2 }
-            ],
-            threshold: 0.3, // 0.0 = perfect match, 1.0 = match anything. 0.3 is strict but fuzzy.
-            ignoreLocation: true, // Search anywhere in the string
-            includeScore: true
-        };
+            const fuseOptions = {
+                keys: [
+                    { name: 'description', weight: 0.5 },
+                    { name: 'slug', weight: 0.3 },
+                    { name: 'event_slug', weight: 0.2 }
+                ],
+                threshold: 0.3, // 0.0 = perfect match, 1.0 = match anything. 0.3 is strict but fuzzy.
+                ignoreLocation: true, // Search anywhere in the string
+                includeScore: true
+            };
 
-        const fuse = new Fuse(allMarkets, fuseOptions);
-        const results = fuse.search(query);
+            this.fuseCache = new Fuse(allMarkets, fuseOptions);
+        }
+
+        const results = this.fuseCache.search(query);
 
         // Sort: Watched matching markets first, then by Score
         const sorted = results
