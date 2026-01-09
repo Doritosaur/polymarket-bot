@@ -11,7 +11,7 @@ let server = null;
 
 async function start() {
   try {
-    console.log('Starting Polymarket Monitor Bot...\n');
+    console.log(`[System] Starting Polymer Monitor Bot (PID: ${process.pid})`);
 
     await initializeDiscord();
 

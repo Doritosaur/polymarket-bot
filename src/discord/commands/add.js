@@ -1,6 +1,7 @@
 import { SlashCommandBuilder } from 'discord.js';
 import { config } from '../../config.js';
 import { extractSlug } from '../../utils/formatting.js';
+import { marketRegistry } from '../../database/marketRegistry.js';
 
 export const data = new SlashCommandBuilder()
     .setName('add')
@@ -25,7 +26,10 @@ export async function execute(interaction) {
         const data = await response.json();
 
         if (response.ok && data.success) {
-            await interaction.editReply(`✅ **Success!** Added ${data.addedCount} market(s).`);
+            // Subscribe this channel to the market
+            marketRegistry.subscribe(interaction.guildId, interaction.channelId, 'market', slug);
+
+            await interaction.editReply(`✅ **Success!** Added and watching \`${slug}\` in this channel.`);
         } else {
             throw new Error(data.error || 'Unknown error');
         }

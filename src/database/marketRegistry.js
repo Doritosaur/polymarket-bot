@@ -23,7 +23,11 @@ class MarketRegistry {
         threshold REAL,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        active INTEGER DEFAULT 1
+        active INTEGER DEFAULT 1,
+        watched INTEGER DEFAULT 0,
+        end_date TEXT,
+        image TEXT,
+        group_date TEXT
       );
 
       CREATE TABLE IF NOT EXISTS settings (
@@ -31,6 +35,18 @@ class MarketRegistry {
         value TEXT,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
+
+      CREATE TABLE IF NOT EXISTS subscriptions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id TEXT NOT NULL,
+        channel_id TEXT NOT NULL,
+        target_type TEXT NOT NULL, -- 'market' or 'event'
+        target_slug TEXT NOT NULL, -- slug of the market
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(guild_id, channel_id, target_type, target_slug)
+      );
+      
+      CREATE INDEX IF NOT EXISTS idx_subscriptions_target ON subscriptions(target_slug);
     `);
 
         // Migration logic
@@ -43,6 +59,8 @@ class MarketRegistry {
             const hasThreshold = tableInfo.some(c => c.name === 'threshold');
             const hasEndDate = tableInfo.some(c => c.name === 'end_date');
             const hasImage = tableInfo.some(c => c.name === 'image');
+            const hasGroupDate = tableInfo.some(c => c.name === 'group_date');
+            const hasWatched = tableInfo.some(c => c.name === 'watched');
 
             if (hasName && !hasSlug) {
                 console.log('Migrating database: renaming column name to slug...');
@@ -81,13 +99,11 @@ class MarketRegistry {
                 this.db.exec('ALTER TABLE markets ADD COLUMN image TEXT');
             }
 
-            const hasGroupDate = tableInfo.some(c => c.name === 'group_date');
             if (!hasGroupDate) {
                 console.log('Migrating database: adding column group_date...');
                 this.db.exec('ALTER TABLE markets ADD COLUMN group_date TEXT');
             }
 
-            const hasWatched = tableInfo.some(c => c.name === 'watched');
             if (!hasWatched) {
                 console.log('Migrating database: adding column watched...');
                 this.db.exec('ALTER TABLE markets ADD COLUMN watched INTEGER DEFAULT 0');
@@ -109,6 +125,39 @@ class MarketRegistry {
         }
 
         console.log('Database schema initialized');
+    }
+
+    subscribe(guildId, channelId, targetType, targetSlug) {
+        const stmt = this.db.prepare(`
+            INSERT OR IGNORE INTO subscriptions (guild_id, channel_id, target_type, target_slug)
+            VALUES (?, ?, ?, ?)
+        `);
+        const info = stmt.run(guildId, channelId, targetType, targetSlug);
+        return info.changes > 0;
+    }
+
+    unsubscribe(guildId, channelId, targetType, targetSlug) {
+        const stmt = this.db.prepare(`
+            DELETE FROM subscriptions 
+            WHERE guild_id = ? AND channel_id = ? AND target_type = ? AND target_slug = ?
+        `);
+        const info = stmt.run(guildId, channelId, targetType, targetSlug);
+        return info.changes > 0;
+    }
+
+    getSubscribers(targetSlug) {
+        const stmt = this.db.prepare(`
+            SELECT DISTINCT channel_id, guild_id FROM subscriptions
+            WHERE target_slug = ?
+        `);
+        return stmt.all(targetSlug);
+    }
+
+    hasSubscribers(targetSlug) {
+        const stmt = this.db.prepare(`
+            SELECT 1 FROM subscriptions WHERE target_slug = ? LIMIT 1
+        `);
+        return !!stmt.get(targetSlug);
     }
 
     getSetting(key) {
@@ -369,48 +418,60 @@ class MarketRegistry {
     }
 
     searchMarkets(query, limit = 20) {
-        // Cache the Fuse index to avoid rebuilding it on every search
-        if (!this.fuseCache) {
-            // Fetch all active markets for fuzzy search
-            // We select only necessary fields to keep memory usage low
-            const stmt = this.db.prepare(`
-                SELECT id, condition_id, slug, description, event_slug, threshold, active, watched, image, group_date
-                FROM markets
-                WHERE active = 1
-            `);
-            const allMarkets = stmt.all();
+        // "Search Light, Fetch Heavy" Pattern
 
-            if (allMarkets.length === 0) return [];
+        // 1. Initialize Fuse cache with minimal data if needed
+        if (!this.fuseCache) {
+            // Select ONLY lightweight fields to prevent OOM
+            const stmt = this.db.prepare(`
+                SELECT id, slug, event_slug FROM markets WHERE active = 1
+            `);
+            const lightMarkets = stmt.all();
+
+            if (lightMarkets.length === 0) return [];
 
             const fuseOptions = {
                 keys: [
-                    { name: 'description', weight: 0.5 },
-                    { name: 'slug', weight: 0.3 },
-                    { name: 'event_slug', weight: 0.2 }
+                    { name: 'slug', weight: 0.6 },
+                    { name: 'event_slug', weight: 0.4 }
                 ],
-                threshold: 0.3, // 0.0 = perfect match, 1.0 = match anything. 0.3 is strict but fuzzy.
-                ignoreLocation: true, // Search anywhere in the string
+                threshold: 0.4, // Allow fuzzy typos
+                ignoreLocation: true,
                 includeScore: true
             };
 
-            this.fuseCache = new Fuse(allMarkets, fuseOptions);
+            this.fuseCache = new Fuse(lightMarkets, fuseOptions);
         }
 
+        // 2. Perform fuzzy search on lightweight objects
         const results = this.fuseCache.search(query);
 
-        // Sort: Watched matching markets first, then by Score
-        const sorted = results
-            .sort((a, b) => {
-                // Priority to watched markets
-                if (a.item.watched !== b.item.watched) {
-                    return b.item.watched - a.item.watched; // 1 before 0
-                }
-                return a.score - b.score; // Lower score is better
-            })
-            .slice(0, limit)
-            .map(r => r.item);
+        if (results.length === 0) return [];
 
-        return sorted;
+        // 3. Take top results and fetch full data
+        const topResults = results.slice(0, limit);
+        const ids = topResults.map(r => r.item.id);
+
+        if (ids.length === 0) return [];
+
+        // Fetch full details for just these IDs
+        // We use a safe parameterized query for the IN clause
+        const placeholders = ids.map(() => '?').join(',');
+        const stmt = this.db.prepare(`
+            SELECT id, condition_id, slug, description, clob_token_ids, event_slug, threshold, image, end_date, group_date, active, watched, created_at, updated_at
+            FROM markets
+            WHERE id IN (${placeholders})
+        `);
+
+        const fullMarkets = stmt.all(...ids);
+
+        // 4. Re-sort to match Fuse ranking (since SQL return order isn't guaranteed)
+        // Create a map for O(1) lookup
+        const marketMap = new Map(fullMarkets.map(m => [m.id, m]));
+
+        return topResults
+            .map(r => marketMap.get(r.item.id))
+            .filter(Boolean); // Filter out any missing (shouldn't happen)
     }
 }
 
