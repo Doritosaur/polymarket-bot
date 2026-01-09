@@ -20,12 +20,12 @@ export async function execute(interaction) {
     let eventSlugToUse = null;
 
     // 1. Priority: Direct Exact Event Slug Match
-    const eventsExact = marketRegistry.getMarketsByEventSlug(slugPart);
+    const eventsExact = await marketRegistry.getMarketsByEventSlug(slugPart);
     if (eventsExact && eventsExact.length > 0) {
         eventSlugToUse = eventsExact[0].event_slug;
     } else {
         // 2. Fallback: Infer from Partial Market Slug
-        const matchedEvents = marketRegistry.findDistinctEventsByMarketSlugPartial(slugPart);
+        const matchedEvents = await marketRegistry.findDistinctEventsByMarketSlugPartial(slugPart);
 
         if (matchedEvents.length === 0) {
             // Fallback 3: User might be trying to fetch an event we DON'T track yet.

@@ -18,10 +18,10 @@ export async function execute(interaction) {
     await interaction.deferReply();
 
     // Unsubscribe this channel
-    const wasSubscribed = marketRegistry.unsubscribe(interaction.guildId, interaction.channelId, 'market', slug);
+    const wasSubscribed = await marketRegistry.unsubscribe(interaction.guildId, interaction.channelId, 'market', slug);
 
     // Check if anyone else is still watching
-    const stillActive = marketRegistry.hasSubscribers(slug);
+    const stillActive = await marketRegistry.hasSubscribers(slug);
 
     if (stillActive) {
         if (wasSubscribed) {

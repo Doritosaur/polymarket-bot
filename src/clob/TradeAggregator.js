@@ -1,5 +1,5 @@
 import { config as defaultConfig } from '../config.js';
-import { addTradeToQueue as defaultAddTradeToQueue } from '../queue/tradeQueue.js';
+import { addNotification as defaultAddTradeToQueue } from '../queue/notificationQueue.js';
 
 export class TradeAggregator {
     constructor(deps = {}) {

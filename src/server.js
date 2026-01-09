@@ -1,8 +1,8 @@
 import express from 'express';
 import { marketRegistry } from './database/marketRegistry.js';
-import { clobListener } from './clob/clobListener.js';
 import { config } from './config.js';
 import { getEvent, getMarket } from './utils/gammaClient.js';
+import { publishEvent, EventType } from './utils/broadcast.js';
 
 export function createServer() {
   const app = express();
@@ -18,26 +18,20 @@ export function createServer() {
   });
 
   app.get('/status', (req, res) => {
-    const markets = marketRegistry.getActiveMarkets();
+    // Note: Active Listeners count is now part of Ingest service, not available here directly
     res.json({
       status: 'running',
-      markets: markets.map(m => ({
-        conditionId: m.condition_id,
-        slug: m.slug,
-        description: m.description
-      })),
-      activeListeners: clobListener.getActiveListenersCount(),
-      trackedMarkets: clobListener.getTrackedMarketsCount(),
-      totalMarkets: markets.length,
+      service: 'bot-gateway',
+      totalStats: 'See Ingest Logs'
     });
   });
 
-  app.get('/api/markets', (req, res) => {
+  app.get('/api/markets', async (req, res) => {
     try {
       const includeInactive = req.query.includeInactive === 'true';
       const markets = includeInactive
-        ? marketRegistry.getAllMarkets()
-        : marketRegistry.getActiveMarkets();
+        ? await marketRegistry.getAllMarkets()
+        : await marketRegistry.getActiveMarkets();
 
       res.json({
         success: true,
@@ -51,9 +45,9 @@ export function createServer() {
     }
   });
 
-  app.get('/api/markets/:conditionId', (req, res) => {
+  app.get('/api/markets/:conditionId', async (req, res) => {
     try {
-      const market = marketRegistry.getMarket(req.params.conditionId);
+      const market = await marketRegistry.getMarket(req.params.conditionId);
 
       if (!market) {
         return res.status(404).json({
@@ -85,8 +79,10 @@ export function createServer() {
 
   app.delete('/api/markets/:conditionId', requireAuth, async (req, res) => {
     try {
-      marketRegistry.removeMarket(req.params.conditionId);
-      await clobListener.removeMarket(req.params.conditionId);
+      await marketRegistry.removeMarket(req.params.conditionId);
+
+      // Notify Ingest to stop listening
+      publishEvent(EventType.MARKET_REMOVED, { conditionId: req.params.conditionId });
 
       res.json({
         success: true,
@@ -107,7 +103,7 @@ export function createServer() {
 
       // 1. Fetch relevant markets from local database
       // The `slug` param here is the EVENT slug (e.g. "presidential-election")
-      const markets = marketRegistry.getMarketsByEventSlug(slug);
+      const markets = await marketRegistry.getMarketsByEventSlug(slug);
 
       if (markets.length === 0) {
         return res.status(404).json({
@@ -123,7 +119,7 @@ export function createServer() {
 
       for (const market of markets) {
         try {
-          marketRegistry.removeMarket(market.condition_id);
+          await marketRegistry.removeMarket(market.condition_id);
           removedCount++;
           removedConditionIds.push(market.condition_id);
         } catch (err) {
@@ -138,9 +134,15 @@ export function createServer() {
         });
       }
 
-      // 3. Batch remove from CLOB listener
+      // 3. Notify Ingest
       if (removedConditionIds.length > 0) {
-        await clobListener.removeMarkets(removedConditionIds);
+        // Send one by one or batch? clobListener.removeMarkets takes array
+        // But our event protocol... let's define payload as conditionIds array for batch?
+        // Or just loop. Simple is loop or one event.
+        // clobListener.removeMarkets takes array.
+        // Lets modify broadcast handler to support batch removal or multiple events.
+        // Or just send one event with array.
+        publishEvent(EventType.MARKET_REMOVED, { conditionIds: removedConditionIds });
       }
 
       res.json({
@@ -209,7 +211,10 @@ export function createServer() {
               const groupDate = market.groupItemTitle || null;
 
               // Pass 'slug' (the event slug) as the 5th argument
-              marketRegistry.addMarket(market.conditionId, name, description, clobTokenIds, slug, null, endDate, image, groupDate);
+              // Wait, addMarket returns ID now using Postgres, but we don't capture it here.
+              // Just await it.
+              await marketRegistry.addMarket(market.conditionId, name, description, clobTokenIds, slug, null, endDate, image, groupDate);
+
               addedCount++;
               addedMarkets.push(market.conditionId);
             } catch (err) {
@@ -220,7 +225,8 @@ export function createServer() {
       }
 
       if (addedCount > 0) {
-        await clobListener.addMarkets(addedMarkets);
+        // Notify Ingest
+        publishEvent(EventType.MARKET_ADDED, { conditionIds: addedMarkets });
       }
 
       res.json({

@@ -19,6 +19,13 @@ export const config = {
     sell: 0xE74C3C, // Red
     event: 0x0099FF // Blue
   },
+  db: {
+    host: process.env.POSTGRES_HOST || 'postgres', // Service name in docker-compose
+    port: parseInt(process.env.POSTGRES_PORT || '5432'),
+    user: process.env.POSTGRES_USER || 'admin',
+    password: process.env.POSTGRES_PASSWORD || 'adminpassword',
+    database: process.env.POSTGRES_DB || 'polymarket'
+  },
   polymarket: {
     appUrl: 'https://polymarket.com',
     gammaApiUrl: 'https://gamma-api.polymarket.com'

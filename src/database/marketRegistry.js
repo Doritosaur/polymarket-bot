@@ -1,215 +1,181 @@
-import { Database } from 'bun:sqlite';
-import { join } from 'path';
+import pg from 'pg';
+const { Pool } = pg;
 import Fuse from 'fuse.js';
+import { config } from '../config.js';
 
 class MarketRegistry {
     constructor() {
-        const dbPath = join(import.meta.dir, '../..', 'data', 'markets.db');
-        this.db = new Database(dbPath);
-        this.db.exec("PRAGMA journal_mode = WAL;");
+        this.pool = new Pool({
+            host: config.db.host,
+            port: config.db.port,
+            user: config.db.user,
+            password: config.db.password,
+            database: config.db.database
+        });
+
         this.fuseCache = null;
-        this.initializeSchema();
+
+        // Error handling for idle clients
+        this.pool.on('error', (err, client) => {
+            console.error('Unexpected error on idle client', err);
+            process.exit(-1);
+        });
     }
 
-    initializeSchema() {
-        this.db.exec(`
-      CREATE TABLE IF NOT EXISTS markets (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        condition_id TEXT NOT NULL UNIQUE,
-        slug TEXT,
-        event_slug TEXT,
-        clob_token_ids TEXT,
-        description TEXT,
-        threshold REAL,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        active INTEGER DEFAULT 1,
-        watched INTEGER DEFAULT 0,
-        end_date TEXT,
-        image TEXT,
-        group_date TEXT
-      );
+    async initialize() {
+        await this.initializeSchema();
+    }
 
-      CREATE TABLE IF NOT EXISTS settings (
-        key TEXT PRIMARY KEY,
-        value TEXT,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      );
-
-      CREATE TABLE IF NOT EXISTS subscriptions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        guild_id TEXT NOT NULL,
-        channel_id TEXT NOT NULL,
-        target_type TEXT NOT NULL, -- 'market' or 'event'
-        target_slug TEXT NOT NULL, -- slug of the market
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(guild_id, channel_id, target_type, target_slug)
-      );
-      
-      CREATE INDEX IF NOT EXISTS idx_subscriptions_target ON subscriptions(target_slug);
-    `);
-
-        // Migration logic
+    async initializeSchema() {
+        const client = await this.pool.connect();
         try {
-            const tableInfo = this.db.prepare("PRAGMA table_info(markets)").all();
-            const hasName = tableInfo.some(c => c.name === 'name');
-            const hasSlug = tableInfo.some(c => c.name === 'slug');
-            const hasClobTokenIds = tableInfo.some(c => c.name === 'clob_token_ids');
-            const hasEventSlug = tableInfo.some(c => c.name === 'event_slug');
-            const hasThreshold = tableInfo.some(c => c.name === 'threshold');
-            const hasEndDate = tableInfo.some(c => c.name === 'end_date');
-            const hasImage = tableInfo.some(c => c.name === 'image');
-            const hasGroupDate = tableInfo.some(c => c.name === 'group_date');
-            const hasWatched = tableInfo.some(c => c.name === 'watched');
+            await client.query('BEGIN');
 
-            if (hasName && !hasSlug) {
-                console.log('Migrating database: renaming column name to slug...');
-                this.db.exec('ALTER TABLE markets RENAME COLUMN name TO slug');
-            }
-
-            if (!hasClobTokenIds) {
-                console.log('Migrating database: adding column clob_token_ids...');
-                this.db.exec('ALTER TABLE markets ADD COLUMN clob_token_ids TEXT');
-            }
-
-            if (!hasEventSlug) {
-                console.log('Migrating database: adding column event_slug...');
-                this.db.exec('ALTER TABLE markets ADD COLUMN event_slug TEXT');
-            }
-
-            if (!hasThreshold) {
-                console.log('Migrating database: adding column threshold...');
-                this.db.exec('ALTER TABLE markets ADD COLUMN threshold REAL');
-
-                // Backfill existing markets with current global default if available
-                const globalDefault = this.getSetting('minAmountThreshold');
-                if (globalDefault) {
-                    console.log(`Backfilling existing markets with threshold: ${globalDefault}`);
-                    this.db.exec(`UPDATE markets SET threshold = ${globalDefault} WHERE threshold IS NULL`);
-                }
-            }
-
-            if (!hasEndDate) {
-                console.log('Migrating database: adding column end_date...');
-                this.db.exec('ALTER TABLE markets ADD COLUMN end_date TEXT');
-            }
-
-            if (!hasImage) {
-                console.log('Migrating database: adding column image...');
-                this.db.exec('ALTER TABLE markets ADD COLUMN image TEXT');
-            }
-
-            if (!hasGroupDate) {
-                console.log('Migrating database: adding column group_date...');
-                this.db.exec('ALTER TABLE markets ADD COLUMN group_date TEXT');
-            }
-
-            if (!hasWatched) {
-                console.log('Migrating database: adding column watched...');
-                this.db.exec('ALTER TABLE markets ADD COLUMN watched INTEGER DEFAULT 0');
-                this.db.exec('UPDATE markets SET watched = 1 WHERE active = 1');
-            }
-
-
-            // Create indices AFTER ensuring columns exist
-            this.db.exec(`
-              CREATE INDEX IF NOT EXISTS idx_markets_condition_id ON markets(condition_id);
-              CREATE INDEX IF NOT EXISTS idx_markets_active ON markets(active);
-              CREATE INDEX IF NOT EXISTS idx_markets_watched ON markets(watched);
-              CREATE INDEX IF NOT EXISTS idx_markets_event_slug ON markets(event_slug);
-              CREATE INDEX IF NOT EXISTS idx_markets_created_at ON markets(created_at);
+            await client.query(`
+                CREATE TABLE IF NOT EXISTS markets (
+                    id SERIAL PRIMARY KEY,
+                    condition_id VARCHAR(255) NOT NULL UNIQUE,
+                    slug TEXT,
+                    event_slug TEXT,
+                    clob_token_ids TEXT,
+                    description TEXT,
+                    threshold REAL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    active INTEGER DEFAULT 1,
+                    watched INTEGER DEFAULT 0,
+                    end_date TEXT,
+                    image TEXT,
+                    group_date TEXT
+                );
             `);
 
-        } catch (err) {
-            console.warn('Migration check failed (ignoring):', err.message);
+            await client.query(`
+                CREATE TABLE IF NOT EXISTS settings (
+                    key VARCHAR(255) PRIMARY KEY,
+                    value TEXT,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            `);
+
+            await client.query(`
+                CREATE TABLE IF NOT EXISTS subscriptions (
+                    id SERIAL PRIMARY KEY,
+                    guild_id VARCHAR(255) NOT NULL,
+                    channel_id VARCHAR(255) NOT NULL,
+                    target_type VARCHAR(50) NOT NULL, -- 'market' or 'event'
+                    target_slug TEXT NOT NULL, -- slug of the market
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(guild_id, channel_id, target_type, target_slug)
+                );
+            `);
+
+            await client.query(`
+                CREATE INDEX IF NOT EXISTS idx_subscriptions_target ON subscriptions(target_slug);
+                CREATE INDEX IF NOT EXISTS idx_markets_condition_id ON markets(condition_id);
+                CREATE INDEX IF NOT EXISTS idx_markets_active ON markets(active);
+                CREATE INDEX IF NOT EXISTS idx_markets_watched ON markets(watched);
+                CREATE INDEX IF NOT EXISTS idx_markets_event_slug ON markets(event_slug);
+                CREATE INDEX IF NOT EXISTS idx_markets_created_at ON markets(created_at);
+            `);
+
+            await client.query('COMMIT');
+            console.log('Database schema initialized (PostgreSQL)');
+        } catch (e) {
+            await client.query('ROLLBACK');
+            throw e;
+        } finally {
+            client.release();
+        }
+    }
+
+    async subscribe(guildId, channelId, targetType, targetSlug) {
+        const query = `
+            INSERT INTO subscriptions (guild_id, channel_id, target_type, target_slug)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (guild_id, channel_id, target_type, target_slug) DO NOTHING
+        `;
+        const res = await this.pool.query(query, [guildId, channelId, targetType, targetSlug]);
+        return (res.rowCount || 0) > 0;
+    }
+
+    async unsubscribe(guildId, channelId, targetType, targetSlug) {
+        const query = `
+            DELETE FROM subscriptions 
+            WHERE guild_id = $1 AND channel_id = $2 AND target_type = $3 AND target_slug = $4
+        `;
+        const res = await this.pool.query(query, [guildId, channelId, targetType, targetSlug]);
+        return (res.rowCount || 0) > 0;
+    }
+
+    async getSubscribers(targetSlug) {
+        const query = `
+            SELECT DISTINCT channel_id, guild_id FROM subscriptions
+            WHERE target_slug = $1
+        `;
+        const res = await this.pool.query(query, [targetSlug]);
+        return res.rows;
+    }
+
+    async hasSubscribers(targetSlug) {
+        const query = `
+            SELECT 1 FROM subscriptions WHERE target_slug = $1 LIMIT 1
+        `;
+        const res = await this.pool.query(query, [targetSlug]);
+        return res.rows.length > 0;
+    }
+
+    async getSetting(key) {
+        const res = await this.pool.query('SELECT value FROM settings WHERE key = $1', [key]);
+        return res.rows[0] ? res.rows[0].value : null;
+    }
+
+    async setSetting(key, value) {
+        const query = `
+            INSERT INTO settings (key, value, updated_at)
+            VALUES ($1, $2, CURRENT_TIMESTAMP)
+            ON CONFLICT(key) DO UPDATE SET
+                value = EXCLUDED.value,
+                updated_at = EXCLUDED.updated_at
+        `;
+        await this.pool.query(query, [key, String(value)]);
+    }
+
+    async addMarket(conditionId, slug = null, description = null, clobTokenIds = null, eventSlug = null, threshold = null, endDate = null, image = null, groupDate = null) {
+        const normalizedConditionId = this.normalizeConditionId(conditionId);
+
+        if (threshold === null) {
+            const globalIdx = await this.getSetting('minAmountThreshold');
+            if (globalIdx) threshold = parseFloat(globalIdx);
         }
 
-        console.log('Database schema initialized');
-    }
+        const query = `
+            INSERT INTO markets (condition_id, slug, description, clob_token_ids, event_slug, threshold, end_date, image, group_date, active, watched, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, 1, CURRENT_TIMESTAMP)
+            ON CONFLICT(condition_id) DO UPDATE SET
+                slug = COALESCE(EXCLUDED.slug, markets.slug),
+                description = COALESCE(EXCLUDED.description, markets.description),
+                clob_token_ids = COALESCE(EXCLUDED.clob_token_ids, markets.clob_token_ids),
+                event_slug = COALESCE(EXCLUDED.event_slug, markets.event_slug),
+                threshold = COALESCE(EXCLUDED.threshold, markets.threshold),
+                end_date = COALESCE(EXCLUDED.end_date, markets.end_date),
+                image = COALESCE(EXCLUDED.image, markets.image),
+                group_date = COALESCE(EXCLUDED.group_date, markets.group_date),
+                active = 1,
+                watched = 1,
+                updated_at = CURRENT_TIMESTAMP
+            RETURNING id
+        `;
 
-    subscribe(guildId, channelId, targetType, targetSlug) {
-        const stmt = this.db.prepare(`
-            INSERT OR IGNORE INTO subscriptions (guild_id, channel_id, target_type, target_slug)
-            VALUES (?, ?, ?, ?)
-        `);
-        const info = stmt.run(guildId, channelId, targetType, targetSlug);
-        return info.changes > 0;
-    }
-
-    unsubscribe(guildId, channelId, targetType, targetSlug) {
-        const stmt = this.db.prepare(`
-            DELETE FROM subscriptions 
-            WHERE guild_id = ? AND channel_id = ? AND target_type = ? AND target_slug = ?
-        `);
-        const info = stmt.run(guildId, channelId, targetType, targetSlug);
-        return info.changes > 0;
-    }
-
-    getSubscribers(targetSlug) {
-        const stmt = this.db.prepare(`
-            SELECT DISTINCT channel_id, guild_id FROM subscriptions
-            WHERE target_slug = ?
-        `);
-        return stmt.all(targetSlug);
-    }
-
-    hasSubscribers(targetSlug) {
-        const stmt = this.db.prepare(`
-            SELECT 1 FROM subscriptions WHERE target_slug = ? LIMIT 1
-        `);
-        return !!stmt.get(targetSlug);
-    }
-
-    getSetting(key) {
-        const stmt = this.db.prepare('SELECT value FROM settings WHERE key = ?');
-        const row = stmt.get(key);
-        return row ? row.value : null;
-    }
-
-    setSetting(key, value) {
-        const stmt = this.db.prepare(`
-            INSERT INTO settings (key, value, updated_at)
-            VALUES (?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(key) DO UPDATE SET
-                value = excluded.value,
-                updated_at = excluded.updated_at
-        `);
-        stmt.run(key, String(value));
-    }
-
-
-    addMarket(conditionId, slug = null, description = null, clobTokenIds = null, eventSlug = null, threshold = null, endDate = null, image = null, groupDate = null) {
         try {
-            const normalizedConditionId = this.normalizeConditionId(conditionId);
+            const res = await this.pool.query(query, [
+                normalizedConditionId, slug, description, clobTokenIds, eventSlug, threshold, endDate, image, groupDate
+            ]);
 
-            if (threshold === null) {
-                const globalIdx = this.getSetting('minAmountThreshold');
-                if (globalIdx) threshold = parseFloat(globalIdx);
-            }
-
-            const stmt = this.db.prepare(`
-        INSERT INTO markets (condition_id, slug, description, clob_token_ids, event_slug, threshold, end_date, image, group_date, active, watched)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1)
-        ON CONFLICT(condition_id) DO UPDATE SET
-          slug = COALESCE(excluded.slug, slug),
-          description = COALESCE(excluded.description, description),
-          clob_token_ids = COALESCE(excluded.clob_token_ids, clob_token_ids),
-          event_slug = COALESCE(excluded.event_slug, event_slug),
-          threshold = COALESCE(excluded.threshold, threshold),
-          end_date = COALESCE(excluded.end_date, end_date),
-          image = COALESCE(excluded.image, image),
-          group_date = COALESCE(excluded.group_date, group_date),
-          active = 1,
-          watched = 1,
-          updated_at = CURRENT_TIMESTAMP
-      `);
-
-            stmt.run(normalizedConditionId, slug, description, clobTokenIds, eventSlug, threshold, endDate, image, groupDate);
-            const id = this.db.lastInsertRowId;
             this.fuseCache = null; // Invalidate cache
 
             return {
-                id: Number(id),
+                id: res.rows[0].id,
                 conditionId: normalizedConditionId,
                 slug,
                 description,
@@ -223,25 +189,58 @@ class MarketRegistry {
                 watched: true
             };
         } catch (error) {
-            if (error.message?.includes('UNIQUE constraint') || error.message?.includes('already exists')) {
+            if (error.code === '23505') { // Unique constraint violation code
                 throw new Error(`Market ${conditionId} already exists`);
             }
             throw error;
         }
     }
 
-    upsertMarkets(markets, options = { fullSync: false }) {
-        const globalDefaultThreshold = this.getSetting('minAmountThreshold');
+    async upsertMarkets(markets, options = { fullSync: false }) {
+        const globalDefaultThreshold = await this.getSetting('minAmountThreshold');
         const defaultThreshold = globalDefaultThreshold ? parseFloat(globalDefaultThreshold) : null;
 
-        const upsertTransaction = this.db.transaction((marketsToUpsert) => {
+        const client = await this.pool.connect();
+
+        try {
+            await client.query('BEGIN');
             this.fuseCache = null; // Invalidate cache
+
             if (options.fullSync) {
-                this.db.exec('UPDATE markets SET active = 0 WHERE active = 1');
+                await client.query('UPDATE markets SET active = 0 WHERE active = 1');
             }
 
             const results = [];
-            for (const market of marketsToUpsert) {
+            // Postgres supports bulk inserts but doing one-by-one with transaction is acceptable for now
+            // Or we could use UNNEST for performance, but let's stick to simple first.
+
+            const query = `
+                INSERT INTO markets (condition_id, slug, description, clob_token_ids, event_slug, threshold, end_date, image, group_date, active, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, CURRENT_TIMESTAMP)
+                ON CONFLICT(condition_id) DO UPDATE SET
+                    slug = COALESCE(EXCLUDED.slug, markets.slug),
+                    description = COALESCE(EXCLUDED.description, markets.description),
+                    clob_token_ids = COALESCE(EXCLUDED.clob_token_ids, markets.clob_token_ids),
+                    event_slug = COALESCE(EXCLUDED.event_slug, markets.event_slug),
+                    threshold = COALESCE(EXCLUDED.threshold, markets.threshold),
+                    end_date = COALESCE(EXCLUDED.end_date, markets.end_date),
+                    image = COALESCE(EXCLUDED.image, markets.image),
+                    group_date = COALESCE(EXCLUDED.group_date, markets.group_date),
+                    active = 1,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE 
+                    markets.slug IS DISTINCT FROM EXCLUDED.slug OR
+                    markets.description IS DISTINCT FROM EXCLUDED.description OR
+                    markets.clob_token_ids IS DISTINCT FROM EXCLUDED.clob_token_ids OR
+                    markets.event_slug IS DISTINCT FROM EXCLUDED.event_slug OR
+                    markets.threshold IS DISTINCT FROM EXCLUDED.threshold OR
+                    markets.end_date IS DISTINCT FROM EXCLUDED.end_date OR
+                    markets.image IS DISTINCT FROM EXCLUDED.image OR
+                    markets.group_date IS DISTINCT FROM EXCLUDED.group_date OR
+                    markets.active != 1
+            `;
+
+            for (const market of markets) {
                 let { threshold } = market;
                 if (threshold === null || threshold === undefined) {
                     threshold = defaultThreshold;
@@ -249,50 +248,29 @@ class MarketRegistry {
 
                 const normalizedConditionId = this.normalizeConditionId(market.conditionId);
 
-                const stmt = this.db.prepare(`
-                    INSERT INTO markets (condition_id, slug, description, clob_token_ids, event_slug, threshold, end_date, image, group_date, active)
-                    VALUES ($conditionId, $slug, $description, $clobTokenIds, $eventSlug, $threshold, $endDate, $image, $groupDate, 1)
-                    ON CONFLICT(condition_id) DO UPDATE SET
-                        slug = COALESCE($slug, slug),
-                        description = COALESCE($description, description),
-                        clob_token_ids = COALESCE($clobTokenIds, clob_token_ids),
-                        event_slug = COALESCE(excluded.event_slug, event_slug),
-                        threshold = COALESCE($threshold, threshold),
-                        end_date = COALESCE(excluded.end_date, end_date),
-                        image = COALESCE($image, image),
-                        group_date = COALESCE(excluded.group_date, group_date),
-                        active = 1,
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE 
-                        slug != excluded.slug OR
-                        description != excluded.description OR
-                        clob_token_ids != excluded.clob_token_ids OR
-                        event_slug != excluded.event_slug OR
-                        threshold != excluded.threshold OR
-                        end_date != excluded.end_date OR
-                        image != excluded.image OR
-                        group_date != excluded.group_date OR
-                        active != 1
-                `);
-
-                stmt.run({
-                    $conditionId: normalizedConditionId,
-                    $slug: market.slug,
-                    $description: market.description,
-                    $clobTokenIds: market.clobTokenIds,
-                    $eventSlug: market.eventSlug,
-                    $threshold: threshold,
-                    $endDate: market.endDate,
-                    $image: market.image,
-                    $groupDate: market.groupDate
-                });
+                await client.query(query, [
+                    normalizedConditionId,
+                    market.slug,
+                    market.description,
+                    market.clobTokenIds,
+                    market.eventSlug,
+                    threshold,
+                    market.endDate,
+                    market.image,
+                    market.groupDate
+                ]);
 
                 results.push(normalizedConditionId);
             }
-            return results;
-        });
 
-        return upsertTransaction(markets);
+            await client.query('COMMIT');
+            return results;
+        } catch (e) {
+            await client.query('ROLLBACK');
+            throw e;
+        } finally {
+            client.release();
+        }
     }
 
     normalizeConditionId(conditionId) {
@@ -305,18 +283,16 @@ class MarketRegistry {
         return conditionId;
     }
 
-    removeMarket(conditionId) {
+    async removeMarket(conditionId) {
         const normalizedConditionId = this.normalizeConditionId(conditionId);
 
-        const stmt = this.db.prepare(`
-      UPDATE markets 
-      SET active = 0, watched = 0, updated_at = CURRENT_TIMESTAMP
-      WHERE condition_id = ?
-    `);
+        const res = await this.pool.query(`
+            UPDATE markets 
+            SET active = 0, watched = 0, updated_at = CURRENT_TIMESTAMP
+            WHERE condition_id = $1
+        `, [normalizedConditionId]);
 
-        const result = stmt.run(normalizedConditionId);
-
-        if (result.changes === 0) {
+        if (res.rowCount === 0) {
             throw new Error(`Market ${conditionId} not found`);
         }
         this.fuseCache = null; // Invalidate cache
@@ -324,109 +300,106 @@ class MarketRegistry {
         return true;
     }
 
-    setMarketWatched(conditionId, watched) {
+    async setMarketWatched(conditionId, watched) {
         const normalizedConditionId = this.normalizeConditionId(conditionId);
         const val = watched ? 1 : 0;
-        const stmt = this.db.prepare(`
-            UPDATE markets SET watched = ?, updated_at = CURRENT_TIMESTAMP WHERE condition_id = ?
-        `);
-        const result = stmt.run(val, normalizedConditionId);
-        if (result.changes === 0) {
+
+        const res = await this.pool.query(`
+            UPDATE markets SET watched = $1, updated_at = CURRENT_TIMESTAMP WHERE condition_id = $2
+        `, [val, normalizedConditionId]);
+
+        if (res.rowCount === 0) {
             throw new Error(`Market ${conditionId} not found`);
         }
         return true;
     }
 
-    setMarketThreshold(conditionId, amount) {
+    async setMarketThreshold(conditionId, amount) {
         const normalizedConditionId = this.normalizeConditionId(conditionId);
-        const stmt = this.db.prepare(`
-            UPDATE markets SET threshold = ?, updated_at = CURRENT_TIMESTAMP WHERE condition_id = ?
-        `);
-        const result = stmt.run(amount, normalizedConditionId);
-        if (result.changes === 0) {
+
+        const res = await this.pool.query(`
+            UPDATE markets SET threshold = $1, updated_at = CURRENT_TIMESTAMP WHERE condition_id = $2
+        `, [amount, normalizedConditionId]);
+
+        if (res.rowCount === 0) {
             throw new Error(`Market ${conditionId} not found`);
         }
         return true;
     }
 
-    setEventThreshold(eventSlug, amount) {
-        const stmt = this.db.prepare(`
-            UPDATE markets SET threshold = ?, updated_at = CURRENT_TIMESTAMP WHERE event_slug = ? AND active = 1
+    async setEventThreshold(eventSlug, amount) {
+        const res = await this.pool.query(`
+            UPDATE markets SET threshold = $1, updated_at = CURRENT_TIMESTAMP WHERE event_slug = $2 AND active = 1
+        `, [amount, eventSlug]);
+        return res.rowCount;
+    }
+
+    async findMarketBySlugPartial(partialSlug) {
+        const res = await this.pool.query(`
+            SELECT * FROM markets WHERE slug LIKE $1 AND active = 1 LIMIT 1
+        `, [`%${partialSlug}%`]);
+        return res.rows[0];
+    }
+
+    async findDistinctEventsByMarketSlugPartial(partialSlug) {
+        const res = await this.pool.query(`
+            SELECT DISTINCT event_slug FROM markets WHERE slug LIKE $1 AND active = 1
+        `, [`%${partialSlug}%`]);
+        return res.rows;
+    }
+
+    async getWatchedMarkets() {
+        const res = await this.pool.query(`
+            SELECT id, condition_id, slug, description, clob_token_ids, event_slug, threshold, image, end_date, group_date, created_at, updated_at
+            FROM markets
+            WHERE watched = 1 AND active = 1
+            ORDER BY created_at DESC
         `);
-        const result = stmt.run(amount, eventSlug);
-        return result.changes;
+        return res.rows;
     }
 
-    findMarketBySlugPartial(partialSlug) {
-        const stmt = this.db.prepare(`
-            SELECT * FROM markets WHERE slug LIKE ? AND active = 1 LIMIT 1
+    async getAllMarkets() {
+        const res = await this.pool.query(`
+            SELECT id, condition_id, slug, description, clob_token_ids, event_slug, threshold, image, end_date, group_date, active, created_at, updated_at
+            FROM markets
+            ORDER BY created_at DESC
         `);
-        return stmt.get(`%${partialSlug}%`);
+        return res.rows;
     }
 
-    findDistinctEventsByMarketSlugPartial(partialSlug) {
-        const stmt = this.db.prepare(`
-            SELECT DISTINCT event_slug FROM markets WHERE slug LIKE ? AND active = 1
-        `);
-        return stmt.all(`%${partialSlug}%`);
-    }
-
-    getWatchedMarkets() {
-        const stmt = this.db.prepare(`
-      SELECT id, condition_id, slug, description, clob_token_ids, event_slug, threshold, image, end_date, group_date, created_at, updated_at
-      FROM markets
-      WHERE watched = 1 AND active = 1
-      ORDER BY created_at DESC
-    `);
-
-        return stmt.all();
-    }
-
-    getAllMarkets() {
-        const stmt = this.db.prepare(`
-      SELECT id, condition_id, slug, description, clob_token_ids, event_slug, threshold, image, end_date, group_date, active, created_at, updated_at
-      FROM markets
-      ORDER BY created_at DESC
-    `);
-
-        return stmt.all();
-    }
-
-    getMarket(conditionId) {
+    async getMarket(conditionId) {
         const normalizedConditionId = this.normalizeConditionId(conditionId);
-
-        const stmt = this.db.prepare(`
-      SELECT id, condition_id, slug, description, clob_token_ids, event_slug, threshold, image, end_date, group_date, active, created_at, updated_at
-      FROM markets
-      WHERE condition_id = ?
-    `);
-
-        return stmt.get(normalizedConditionId);
+        const res = await this.pool.query(`
+            SELECT id, condition_id, slug, description, clob_token_ids, event_slug, threshold, image, end_date, group_date, active, created_at, updated_at
+            FROM markets
+            WHERE condition_id = $1
+        `, [normalizedConditionId]);
+        return res.rows[0];
     }
 
-    close() {
-        this.db.close();
+    async close() {
+        await this.pool.end();
     }
 
-    getMarketsByEventSlug(eventSlug) {
-        const stmt = this.db.prepare(`
-        SELECT id, condition_id, slug, description, clob_token_ids, event_slug, threshold, image, end_date, group_date, active, watched, created_at, updated_at
-        FROM markets
-        WHERE event_slug = ? AND active = 1
-      `);
-        return stmt.all(eventSlug);
+    async getMarketsByEventSlug(eventSlug) {
+        const res = await this.pool.query(`
+            SELECT id, condition_id, slug, description, clob_token_ids, event_slug, threshold, image, end_date, group_date, active, watched, created_at, updated_at
+            FROM markets
+            WHERE event_slug = $1 AND active = 1
+        `, [eventSlug]);
+        return res.rows;
     }
 
-    searchMarkets(query, limit = 20) {
+    async searchMarkets(query, limit = 20) {
         // "Search Light, Fetch Heavy" Pattern
 
         // 1. Initialize Fuse cache with minimal data if needed
         if (!this.fuseCache) {
             // Select ONLY lightweight fields to prevent OOM
-            const stmt = this.db.prepare(`
+            const res = await this.pool.query(`
                 SELECT id, slug, event_slug FROM markets WHERE active = 1
             `);
-            const lightMarkets = stmt.all();
+            const lightMarkets = res.rows;
 
             if (lightMarkets.length === 0) return [];
 
@@ -455,23 +428,21 @@ class MarketRegistry {
         if (ids.length === 0) return [];
 
         // Fetch full details for just these IDs
-        // We use a safe parameterized query for the IN clause
-        const placeholders = ids.map(() => '?').join(',');
-        const stmt = this.db.prepare(`
+        // "SELECT ... WHERE id = ANY($1)"
+        const res = await this.pool.query(`
             SELECT id, condition_id, slug, description, clob_token_ids, event_slug, threshold, image, end_date, group_date, active, watched, created_at, updated_at
             FROM markets
-            WHERE id IN (${placeholders})
-        `);
+            WHERE id = ANY($1)
+        `, [ids]);
 
-        const fullMarkets = stmt.all(...ids);
+        const fullMarkets = res.rows;
 
         // 4. Re-sort to match Fuse ranking (since SQL return order isn't guaranteed)
-        // Create a map for O(1) lookup
         const marketMap = new Map(fullMarkets.map(m => [m.id, m]));
 
         return topResults
             .map(r => marketMap.get(r.item.id))
-            .filter(Boolean); // Filter out any missing (shouldn't happen)
+            .filter(Boolean);
     }
 }
 

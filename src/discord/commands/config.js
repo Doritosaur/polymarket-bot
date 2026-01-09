@@ -1,8 +1,8 @@
 import { SlashCommandBuilder } from 'discord.js';
 import { marketRegistry } from '../../database/marketRegistry.js';
-import { clobListener } from '../../clob/clobListener.js';
 import { safeFloat, formatUSD } from '../../utils/number.js';
 import { extractSlug } from '../../utils/formatting.js';
+import { publishEvent, EventType } from '../../utils/broadcast.js';
 
 export const data = new SlashCommandBuilder()
     .setName('config')
@@ -34,10 +34,11 @@ export async function execute(interaction) {
     if (subcommand === 'threshold') {
         const amount = interaction.options.getNumber('amount');
 
-        marketRegistry.setSetting('minAmountThreshold', amount);
+        await marketRegistry.setSetting('minAmountThreshold', amount);
         // Sync with runtime components
         if (global.config) global.config.minAmountThreshold = amount;
-        clobListener.setThreshold(amount);
+
+        publishEvent(EventType.THRESHOLD_UPDATED, { type: 'global', amount });
 
         return interaction.reply(`✅ Global minimum trade threshold updated to **${formatUSD(amount)}**.`);
     }
@@ -48,10 +49,10 @@ export async function execute(interaction) {
         const amount = interaction.options.getNumber('amount');
 
         // Note: Logic from setEvent.js
-        const changes = marketRegistry.setEventThreshold(slug, amount);
+        const changes = await marketRegistry.setEventThreshold(slug, amount);
 
         // Also update runtime listeners
-        clobListener.updateEventThreshold(slug, amount);
+        publishEvent(EventType.THRESHOLD_UPDATED, { type: 'event', slug, amount });
 
         if (changes > 0) {
             return interaction.reply(`✅ Updated threshold for event \`${slug}\` to **${formatUSD(amount)}**. Affects ${changes} market(s).`);

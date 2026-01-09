@@ -1,24 +1,22 @@
 import { createServer } from './server.js';
 
-import { clobListener } from './clob/clobListener.js';
 import { initializeDiscord, cleanupDiscord } from './discord/notifier.js';
 import { marketRegistry } from './database/marketRegistry.js';
-import { closeQueue } from './queue/tradeQueue.js';
-import { initializeMarketFetcher, closeMarketQueue } from './queue/marketQueue.js';
+import { startNotificationWorker, closeNotificationQueue } from './queue/notificationQueue.js';
 import { config } from './config.js';
+import { closeBroadcast } from './utils/broadcast.js';
 
 let server = null;
 
 async function start() {
   try {
-    console.log(`[System] Starting Polymer Monitor Bot (PID: ${process.pid})`);
+    console.log(`[System] Starting Polymer Monitor Bot (Gateway) (PID: ${process.pid})`);
 
+    await marketRegistry.initialize();
     await initializeDiscord();
 
-    await clobListener.initialize();
-
-    // Start the Market Fetcher Cron
-    await initializeMarketFetcher();
+    // Start consuming notifications from Ingest
+    startNotificationWorker();
 
     const app = createServer();
 
@@ -26,7 +24,6 @@ async function start() {
       console.log(`\nServer running on http://localhost:${config.port}`);
       console.log(`Health check: http://localhost:${config.port}/health`);
       console.log(`Status: http://localhost:${config.port}/status\n`);
-      console.log('Listening for large trades on Polymarket markets (via CLOB)...\n');
     });
 
     process.on('SIGINT', shutdown);
@@ -45,12 +42,10 @@ async function shutdown() {
     server.close();
   }
 
-
-  await clobListener.cleanup();
-  await closeQueue();
-  await closeMarketQueue();
+  await closeNotificationQueue();
   await cleanupDiscord();
-  marketRegistry.close();
+  await marketRegistry.close();
+  closeBroadcast();
 
   console.log('Shutdown complete');
   process.exit(0);

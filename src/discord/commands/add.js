@@ -27,7 +27,7 @@ export async function execute(interaction) {
 
         if (response.ok && data.success) {
             // Subscribe this channel to the market
-            marketRegistry.subscribe(interaction.guildId, interaction.channelId, 'market', slug);
+            await marketRegistry.subscribe(interaction.guildId, interaction.channelId, 'market', slug);
 
             await interaction.editReply(`✅ **Success!** Added and watching \`${slug}\` in this channel.`);
         } else {

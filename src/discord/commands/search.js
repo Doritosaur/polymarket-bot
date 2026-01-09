@@ -20,7 +20,7 @@ export async function execute(interaction) {
     // Defer because search+fetch might take >3s (Discord timeout)
     await interaction.deferReply();
 
-    const results = marketRegistry.searchMarkets(query, 20);
+    const results = await marketRegistry.searchMarkets(query, 20);
 
     if (results.length === 0) {
         return interaction.editReply(`🔍 No active markets found matching: \`${query}\``);

@@ -29,7 +29,7 @@ class ClobListener {
         }
 
         // Sync global threshold from registry to aggregator
-        const storedThreshold = marketRegistry.getSetting('minAmountThreshold');
+        const storedThreshold = await marketRegistry.getSetting('minAmountThreshold');
         if (storedThreshold) {
             this.aggregator.setGlobalThreshold(storedThreshold);
             console.log(`Loaded stored threshold: ${storedThreshold}`);
@@ -37,14 +37,14 @@ class ClobListener {
 
         let marketsToLoad = [];
         if (specifiedConditionId) {
-            const market = marketRegistry.getMarket(specifiedConditionId);
+            const market = await marketRegistry.getMarket(specifiedConditionId);
             if (market) marketsToLoad.push(market);
         } else {
             // Only load all active if we are starting fresh or don't have them
             if (this.subscribedAssets.size === 0) {
                 // We use getWatchedMarkets now because we only want to subscribe to markets the user explicitly watches.
                 // The DB might contain thousands of "active" markets (fetched from API), but we don't want to track all of them.
-                marketsToLoad = marketRegistry.getWatchedMarkets();
+                marketsToLoad = await marketRegistry.getWatchedMarkets();
             }
         }
 
@@ -245,7 +245,7 @@ class ClobListener {
     async addMarket(conditionId, slug, description, clobTokenIds = null) {
         console.log(`[CLOB] Adding market ${slug} incrementally...`);
         // 1. Fetch full details from DB (to get everything)
-        const market = marketRegistry.getMarket(conditionId);
+        const market = await marketRegistry.getMarket(conditionId);
         if (!market) return;
 
         // 2. Register (Update Map)
@@ -275,7 +275,7 @@ class ClobListener {
         // To be safe/consistent with registry cache:
         const fullMarkets = [];
         for (const m of markets) {
-            const fresh = marketRegistry.getMarket(m.condition_id || m); // handle object or ID
+            const fresh = await marketRegistry.getMarket(m.condition_id || m); // handle object or ID
             if (fresh) fullMarkets.push(fresh);
         }
 
@@ -315,7 +315,7 @@ class ClobListener {
     }
 
     // Update thresholds in-memory for an event (optimization to avoid restart)
-    updateEventThreshold(eventSlug, newThreshold) {
+    async updateEventThreshold(eventSlug, newThreshold) {
         let count = 0;
         for (const [assetId, info] of this.subscribedAssets.entries()) {
             if (info.slug === eventSlug || info.eventSlug === eventSlug || (marketRegistry.getMarketsByEventSlug(eventSlug).some(m => m.condition_id === info.conditionId))) {
@@ -334,7 +334,7 @@ class ClobListener {
         // 1. Get all markets for the event from registry.
         // 2. For each market, update its assets in the map.
 
-        const markets = marketRegistry.getMarketsByEventSlug(eventSlug);
+        const markets = await marketRegistry.getMarketsByEventSlug(eventSlug);
         const conditionIds = new Set(markets.map(m => m.condition_id));
 
         for (const [assetId, info] of this.subscribedAssets.entries()) {

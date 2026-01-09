@@ -89,7 +89,7 @@ export async function notifyDiscord(data) {
     const embed = createTradeEmbed(data);
 
     // Get all channels subscribed to this market
-    const subscribers = marketRegistry.getSubscribers(data.slug);
+    const subscribers = await marketRegistry.getSubscribers(data.slug);
 
     if (subscribers.length === 0) return;
 

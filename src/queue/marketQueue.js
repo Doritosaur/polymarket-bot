@@ -103,7 +103,7 @@ async function startMarketWorker() {
                 if (batch.length === 0) return;
                 try {
                     // Perform upsert for this batch
-                    marketRegistry.upsertMarkets(batch, { fullSync: false }); // Partial sync
+                    await marketRegistry.upsertMarkets(batch, { fullSync: false }); // Partial sync
                     totalSynced += batch.length;
                     console.log(`[MarketFetch] Synced batch of ${batch.length} markets (Total: ${totalSynced})`);
                 } catch (dbErr) {
