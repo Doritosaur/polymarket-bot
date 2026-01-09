@@ -2,7 +2,7 @@ import express from 'express';
 import { marketRegistry } from './database/marketRegistry.js';
 import { clobListener } from './clob/clobListener.js';
 import { config } from './config.js';
-import { getEvent } from './utils/gammaClient.js';
+import { getEvent, getMarket } from './utils/gammaClient.js';
 
 export function createServer() {
   const app = express();
@@ -169,12 +169,27 @@ export function createServer() {
         });
       }
 
-      const data = await getEvent(slug);
+      let data = await getEvent(slug);
+      let isSingleMarket = false;
+
+      // Fallback: If event not found, try finding a single market
+      if (!data) {
+        const marketData = await getMarket(slug);
+        if (marketData) {
+          // Wrap it in an event-like structure so the loop below works
+          data = {
+            ...marketData,
+            slug: marketData.slug, // ensure event slug is market slug
+            markets: [marketData]
+          };
+          isSingleMarket = true;
+        }
+      }
 
       if (!data) {
         return res.status(404).json({
           success: false,
-          error: `Event '${slug}' not found`
+          error: `Event or Market '${slug}' not found`
         });
       }
 

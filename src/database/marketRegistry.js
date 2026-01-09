@@ -1,10 +1,12 @@
 import { Database } from 'bun:sqlite';
 import { join } from 'path';
+import Fuse from 'fuse.js';
 
 class MarketRegistry {
     constructor() {
         const dbPath = join(import.meta.dir, '../..', 'data', 'markets.db');
         this.db = new Database(dbPath);
+        this.db.exec("PRAGMA journal_mode = WAL;");
         this.initializeSchema();
     }
 
@@ -78,12 +80,17 @@ class MarketRegistry {
                 this.db.exec('ALTER TABLE markets ADD COLUMN image TEXT');
             }
 
-            // Check for group_date if we want to add it, strict requirements asked for end_date and compact layout
-            // Adding group_date just in case for sorting/context
             const hasGroupDate = tableInfo.some(c => c.name === 'group_date');
             if (!hasGroupDate) {
                 console.log('Migrating database: adding column group_date...');
                 this.db.exec('ALTER TABLE markets ADD COLUMN group_date TEXT');
+            }
+
+            const hasWatched = tableInfo.some(c => c.name === 'watched');
+            if (!hasWatched) {
+                console.log('Migrating database: adding column watched...');
+                this.db.exec('ALTER TABLE markets ADD COLUMN watched INTEGER DEFAULT 0');
+                this.db.exec('UPDATE markets SET watched = 1 WHERE active = 1');
             }
 
 
@@ -91,6 +98,7 @@ class MarketRegistry {
             this.db.exec(`
               CREATE INDEX IF NOT EXISTS idx_markets_condition_id ON markets(condition_id);
               CREATE INDEX IF NOT EXISTS idx_markets_active ON markets(active);
+              CREATE INDEX IF NOT EXISTS idx_markets_watched ON markets(watched);
               CREATE INDEX IF NOT EXISTS idx_markets_event_slug ON markets(event_slug);
             `);
 
@@ -100,8 +108,6 @@ class MarketRegistry {
 
         console.log('Database schema initialized');
     }
-
-    // ... existing methods ...
 
     getSetting(key) {
         const stmt = this.db.prepare('SELECT value FROM settings WHERE key = ?');
@@ -131,8 +137,8 @@ class MarketRegistry {
             }
 
             const stmt = this.db.prepare(`
-        INSERT INTO markets (condition_id, slug, description, clob_token_ids, event_slug, threshold, end_date, image, group_date, active)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+        INSERT INTO markets (condition_id, slug, description, clob_token_ids, event_slug, threshold, end_date, image, group_date, active, watched)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1)
         ON CONFLICT(condition_id) DO UPDATE SET
           slug = COALESCE(excluded.slug, slug),
           description = COALESCE(excluded.description, description),
@@ -143,6 +149,7 @@ class MarketRegistry {
           image = COALESCE(excluded.image, image),
           group_date = COALESCE(excluded.group_date, group_date),
           active = 1,
+          watched = 1,
           updated_at = CURRENT_TIMESTAMP
       `);
 
@@ -160,7 +167,8 @@ class MarketRegistry {
                 endDate,
                 image,
                 groupDate,
-                active: true
+                active: true,
+                watched: true
             };
         } catch (error) {
             if (error.message?.includes('UNIQUE constraint') || error.message?.includes('already exists')) {
@@ -168,6 +176,70 @@ class MarketRegistry {
             }
             throw error;
         }
+    }
+
+    upsertMarkets(markets, options = { fullSync: false }) {
+        const globalDefaultThreshold = this.getSetting('minAmountThreshold');
+        const defaultThreshold = globalDefaultThreshold ? parseFloat(globalDefaultThreshold) : null;
+
+        const upsertTransaction = this.db.transaction((marketsToUpsert) => {
+            if (options.fullSync) {
+                this.db.exec('UPDATE markets SET active = 0 WHERE active = 1');
+            }
+
+            const results = [];
+            for (const market of marketsToUpsert) {
+                let { threshold } = market;
+                if (threshold === null || threshold === undefined) {
+                    threshold = defaultThreshold;
+                }
+
+                const normalizedConditionId = this.normalizeConditionId(market.conditionId);
+
+                const stmt = this.db.prepare(`
+                    INSERT INTO markets (condition_id, slug, description, clob_token_ids, event_slug, threshold, end_date, image, group_date, active)
+                    VALUES ($conditionId, $slug, $description, $clobTokenIds, $eventSlug, $threshold, $endDate, $image, $groupDate, 1)
+                    ON CONFLICT(condition_id) DO UPDATE SET
+                        slug = COALESCE($slug, slug),
+                        description = COALESCE($description, description),
+                        clob_token_ids = COALESCE($clobTokenIds, clob_token_ids),
+                        event_slug = COALESCE(excluded.event_slug, event_slug),
+                        threshold = COALESCE($threshold, threshold),
+                        end_date = COALESCE($endDate, end_date),
+                        image = COALESCE($image, image),
+                        group_date = COALESCE(excluded.group_date, group_date),
+                        active = 1,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE 
+                        slug != excluded.slug OR
+                        description != excluded.description OR
+                        clob_token_ids != excluded.clob_token_ids OR
+                        event_slug != excluded.event_slug OR
+                        threshold != excluded.threshold OR
+                        end_date != excluded.end_date OR
+                        image != excluded.image OR
+                        group_date != excluded.group_date OR
+                        active != 1
+                `);
+
+                stmt.run({
+                    $conditionId: normalizedConditionId,
+                    $slug: market.slug,
+                    $description: market.description,
+                    $clobTokenIds: market.clobTokenIds,
+                    $eventSlug: market.eventSlug,
+                    $threshold: threshold,
+                    $endDate: market.endDate,
+                    $image: market.image,
+                    $groupDate: market.groupDate
+                });
+
+                results.push(normalizedConditionId);
+            }
+            return results;
+        });
+
+        return upsertTransaction(markets);
     }
 
     normalizeConditionId(conditionId) {
@@ -185,7 +257,7 @@ class MarketRegistry {
 
         const stmt = this.db.prepare(`
       UPDATE markets 
-      SET active = 0, updated_at = CURRENT_TIMESTAMP
+      SET active = 0, watched = 0, updated_at = CURRENT_TIMESTAMP
       WHERE condition_id = ?
     `);
 
@@ -195,6 +267,19 @@ class MarketRegistry {
             throw new Error(`Market ${conditionId} not found`);
         }
 
+        return true;
+    }
+
+    setMarketWatched(conditionId, watched) {
+        const normalizedConditionId = this.normalizeConditionId(conditionId);
+        const val = watched ? 1 : 0;
+        const stmt = this.db.prepare(`
+            UPDATE markets SET watched = ?, updated_at = CURRENT_TIMESTAMP WHERE condition_id = ?
+        `);
+        const result = stmt.run(val, normalizedConditionId);
+        if (result.changes === 0) {
+            throw new Error(`Market ${conditionId} not found`);
+        }
         return true;
     }
 
@@ -218,7 +303,6 @@ class MarketRegistry {
         return result.changes;
     }
 
-    // Fuzzy search helper for Discord command
     findMarketBySlugPartial(partialSlug) {
         const stmt = this.db.prepare(`
             SELECT * FROM markets WHERE slug LIKE ? AND active = 1 LIMIT 1
@@ -233,11 +317,11 @@ class MarketRegistry {
         return stmt.all(`%${partialSlug}%`);
     }
 
-    getActiveMarkets() {
+    getWatchedMarkets() {
         const stmt = this.db.prepare(`
       SELECT id, condition_id, slug, description, clob_token_ids, event_slug, threshold, image, end_date, group_date, created_at, updated_at
       FROM markets
-      WHERE active = 1
+      WHERE watched = 1 AND active = 1
       ORDER BY created_at DESC
     `);
 
@@ -265,19 +349,60 @@ class MarketRegistry {
 
         return stmt.get(normalizedConditionId);
     }
+
     close() {
         this.db.close();
     }
 
     getMarketsByEventSlug(eventSlug) {
         const stmt = this.db.prepare(`
-        SELECT id, condition_id, slug, description, clob_token_ids, event_slug, threshold, image, end_date, group_date, active, created_at, updated_at
+        SELECT id, condition_id, slug, description, clob_token_ids, event_slug, threshold, image, end_date, group_date, active, watched, created_at, updated_at
         FROM markets
         WHERE event_slug = ? AND active = 1
       `);
         return stmt.all(eventSlug);
     }
 
+    searchMarkets(query, limit = 20) {
+        // Fetch all active markets for fuzzy search
+        // We select only necessary fields to keep memory usage low
+        const stmt = this.db.prepare(`
+            SELECT id, condition_id, slug, description, event_slug, threshold, active, watched, image, group_date
+            FROM markets
+            WHERE active = 1
+        `);
+        const allMarkets = stmt.all();
+
+        if (allMarkets.length === 0) return [];
+
+        const fuseOptions = {
+            keys: [
+                { name: 'description', weight: 0.5 },
+                { name: 'slug', weight: 0.3 },
+                { name: 'event_slug', weight: 0.2 }
+            ],
+            threshold: 0.3, // 0.0 = perfect match, 1.0 = match anything. 0.3 is strict but fuzzy.
+            ignoreLocation: true, // Search anywhere in the string
+            includeScore: true
+        };
+
+        const fuse = new Fuse(allMarkets, fuseOptions);
+        const results = fuse.search(query);
+
+        // Sort: Watched matching markets first, then by Score
+        const sorted = results
+            .sort((a, b) => {
+                // Priority to watched markets
+                if (a.item.watched !== b.item.watched) {
+                    return b.item.watched - a.item.watched; // 1 before 0
+                }
+                return a.score - b.score; // Lower score is better
+            })
+            .slice(0, limit)
+            .map(r => r.item);
+
+        return sorted;
+    }
 }
 
 export const marketRegistry = new MarketRegistry();

@@ -4,6 +4,7 @@ import { clobListener } from './clob/clobListener.js';
 import { initializeDiscord, cleanupDiscord } from './discord/notifier.js';
 import { marketRegistry } from './database/marketRegistry.js';
 import { closeQueue } from './queue/tradeQueue.js';
+import { initializeMarketFetcher, closeMarketQueue } from './queue/marketQueue.js';
 import { config } from './config.js';
 
 let server = null;
@@ -15,6 +16,9 @@ async function start() {
     await initializeDiscord();
 
     await clobListener.initialize();
+
+    // Start the Market Fetcher Cron
+    await initializeMarketFetcher();
 
     const app = createServer();
 
@@ -44,6 +48,7 @@ async function shutdown() {
 
   await clobListener.cleanup();
   await closeQueue();
+  await closeMarketQueue();
   await cleanupDiscord();
   marketRegistry.close();
 

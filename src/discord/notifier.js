@@ -8,6 +8,7 @@ import * as removeCmd from './commands/remove.js';
 import * as setThresholdCmd from './commands/setThreshold.js';
 import * as setEventCmd from './commands/setEvent.js';
 import * as eventCmd from './commands/event.js';
+import * as searchCmd from './commands/search.js';
 
 let client = null;
 let channel = null;
@@ -17,7 +18,8 @@ export const commandHandlers = {
   [removeCmd.name]: removeCmd.execute,
   [setThresholdCmd.name]: setThresholdCmd.execute,
   [setEventCmd.name]: setEventCmd.execute,
-  [eventCmd.name]: eventCmd.execute
+  [eventCmd.name]: eventCmd.execute,
+  [searchCmd.name]: searchCmd.execute
 };
 
 export async function initializeDiscord() {

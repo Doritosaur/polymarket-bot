@@ -42,7 +42,9 @@ class ClobListener {
         } else {
             // Only load all active if we are starting fresh or don't have them
             if (this.subscribedAssets.size === 0) {
-                marketsToLoad = marketRegistry.getActiveMarkets();
+                // We use getWatchedMarkets now because we only want to subscribe to markets the user explicitly watches.
+                // The DB might contain thousands of "active" markets (fetched from API), but we don't want to track all of them.
+                marketsToLoad = marketRegistry.getWatchedMarkets();
             }
         }
 
