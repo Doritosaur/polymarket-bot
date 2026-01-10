@@ -5,6 +5,7 @@ import { config } from '../../config.js';
 import { getEvent } from '../../utils/gammaClient.js';
 import { safeJsonParse, safeFloat } from '../../utils/number.js';
 import { formatSlug, formatOutcomePrices } from '../../utils/formatting.js';
+import { publishEvent, EventType } from '../../utils/broadcast.js';
 
 export const data = new SlashCommandBuilder()
     .setName('search')
@@ -109,6 +110,14 @@ export async function execute(interaction) {
 
             embed.addFields({ name: eventTitle, value: valueStr, inline: false });
             fieldCount++;
+        }
+
+        if (results.length > 0) {
+            publishEvent(EventType.MARKET_SEARCHED, {
+                query,
+                resultsCount: results.length,
+                user: interaction.user.tag
+            });
         }
 
         await interaction.editReply({ content: '', embeds: [embed] });

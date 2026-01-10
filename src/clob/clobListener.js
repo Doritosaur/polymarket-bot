@@ -266,21 +266,19 @@ class ClobListener {
 
     async addMarkets(markets) {
         console.log(`[CLOB] Adding batch of ${markets.length} markets incrementally...`);
-        // 1. Fetch full details from DB for all
-        // Note: registerMarkets expects market objects, not just IDs. 
-        // Assuming 'markets' passed here are full objects or we fetch them. 
-        // Looking at usage in server.js, it might be passing minimal info. 
-        // For safety, let's just use what's passed if it has data, or re-fetch.
-        // Actually, let's assume valid market objects are passed or we iterate IDs.
-        // To be safe/consistent with registry cache:
-        const fullMarkets = [];
-        for (const m of markets) {
-            const fresh = await marketRegistry.getMarket(m.condition_id || m); // handle object or ID
-            if (fresh) fullMarkets.push(fresh);
-        }
 
+        // extract condition IDs (handle both string IDs and objects)
+        const conditionIds = markets.map(m => m.condition_id || m);
+
+        if (conditionIds.length === 0) return;
+
+        // 1. Bulk Fetch full details from DB
+        const fullMarkets = await marketRegistry.getMarketsByConditionIds(conditionIds);
+
+        // 2. Register
         const newIds = this.registerMarkets(fullMarkets);
 
+        // 3. Subscribe if connected
         if (this.ws && this.ws.readyState === WebSocket.OPEN && newIds.length > 0) {
             this.ws.send(JSON.stringify({
                 type: "market",

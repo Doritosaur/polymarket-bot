@@ -390,6 +390,18 @@ class MarketRegistry {
         return res.rows;
     }
 
+    async getMarketsByConditionIds(conditionIds) {
+        if (!conditionIds || conditionIds.length === 0) return [];
+        const normalizedIds = conditionIds.map(id => this.normalizeConditionId(id));
+
+        const res = await this.pool.query(`
+            SELECT id, condition_id, slug, description, clob_token_ids, event_slug, threshold, image, end_date, group_date, active, watched, created_at, updated_at
+            FROM markets
+            WHERE condition_id = ANY($1)
+        `, [normalizedIds]);
+        return res.rows;
+    }
+
     async searchMarkets(query, limit = 20) {
         // "Search Light, Fetch Heavy" Pattern
 

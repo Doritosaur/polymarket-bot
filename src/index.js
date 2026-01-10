@@ -1,4 +1,5 @@
 import { createServer } from './server.js';
+import { initializeWebSockets } from './websocket.js';
 
 import { initializeDiscord, cleanupDiscord } from './discord/notifier.js';
 import { marketRegistry } from './database/marketRegistry.js';
@@ -24,6 +25,8 @@ async function start() {
       console.log(`\nServer running on http://localhost:${config.port}`);
       console.log(`Health check: http://localhost:${config.port}/health`);
       console.log(`Status: http://localhost:${config.port}/status\n`);
+
+      initializeWebSockets(server);
     });
 
     process.on('SIGINT', shutdown);

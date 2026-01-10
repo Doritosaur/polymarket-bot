@@ -2,44 +2,53 @@
 
 ## Overview
 
-This bot monitors Polymarket trades by listening to the **Polymarket Central Limit Order Book (CLOB)** via WebSocket. It utilizes an **Event-Driven Architecture** with **Redis** to ensure high throughput, reliability, and rate-limit protection for Discord notifications.
+This bot monitors Polymarket trades by listening to the **Polymarket Central Limit Order Book (CLOB)** via WebSocket. It utilizes a **Microservices Architecture** with **Redis** to ensure high throughput, reliability, and separation of concerns.
 
 ## Core Architecture
 
 ```mermaid
 graph TD
-    CLOB[Polymarket CLOB WebSocket] -->|Real-time Trade Data| Listener[CLOB Listener Producer]
-    Listener -->|Add Job (Fast)| Redis[(Redis Queue)]
-    Redis -->|Process Job (Rate Limited)| Worker[Trade Worker Consumer]
-    Worker -->|Calculate Probabilities| LocalCalc[Local Math]
-    Worker -->|Send Embed| Discord[Discord Webhook]
+    subgraph "Ingest Service"
+        CLOB[Polymarket CLOB WebSocket] -->|Real-time Trade Data| Listener[CLOB Listener Producer]
+        Listener -->|Add Job (Fast)| Redis[(Redis Queue)]
+        Events[Redis Pub/Sub] -->|Updates| Listener
+    end
+
+    subgraph "Bot Service"
+        Redis -->|Process Job (Rate Limited)| Worker[Trade Worker Consumer]
+        Worker -->|Calculate Probabilities| LocalCalc[Local Math]
+        Worker -->|Send Embed| Discord[Discord Webhook]
+        API[Express API] -->|Publish Updates| Events
+        DiscordCmds[Discord Commands] -->|Publish Updates| Events
+    end
 ```
 
 ## Key Components
 
-### 1. CLOB Listener (Producer) -- `src/clob/clobListener.js`
-*   **Role**: Connects to Polymarket's WebSocket (`wss://ws-subscriptions-clob.polymarket.com/ws/market`).
-*   **Function**: Subscribes to specific "Asset IDs" (Token IDs) for markets.
+### 1. Ingest Service (`src/ingest/index.js`)
+*   **Role**: Dedicated service for market monitoring and data ingestion.
+*   **Components**:
+    *   **CLOB Listener**: Connects to Polymarket's WebSocket (`wss://ws-subscriptions-clob.polymarket.com/ws/market`) and listens for `last_trade_price`.
+    *   **Market Fetcher**: Periodically syncs markets.
 *   **Logic**:
-    *   Listens for `last_trade_price` events.
-    *   Filters trades below `MIN_AMOUNT_THRESHOLD` (Dynamic).
-    *   **Action**: Pushes trade data to **Redis Queue** immediately (Fire-and-Forget).
-*   **Robustness**: Implements **Auto-Reconnection** with exponential backoff if the WebSocket drops.
+    *   Filters trades below `MIN_AMOUNT_THRESHOLD`.
+    *   Pushes trade data to **Redis Queue** (Fire-and-Forget).
+    *   Listens to **Redis Pub/Sub** for dynamic configuration changes (added markets, threshold updates) from the Bot Service.
 
-### 2. Redis Queue (BullMQ) -- `src/queue/tradeQueue.js`
-*   **Role**: Buffers trade events to decouple ingestion from processing.
-*   **Technology**: Redis + BullMQ.
-*   **Configuration**:
-    *   **Rate Limit**: Max 5 jobs per second (protects Discord API).
-    *   **Persistence**: Jobs are saved to Redis, surviving bot restarts.
+### 2. Redis Framework
+*   **Queue (BullMQ)**: Buffers trade events between Ingest and Bot services.
+    *   Persistence: Jobs survive restarts.
+    *   Rate Limiting: Max 5 jobs/sec (Protect Discord API).
+*   **Pub/Sub**: Synchronizes state (e.g., "New Market Added") between the two services.
 
-### 3. Trade Worker (Consumer) -- `src/queue/tradeQueue.js`
-*   **Role**: Processes queued trades.
-*   **Workflow**:
-    1.  Pick up job from Redis.
-    2.  **Calculate Prices**: Uses the trade price to imply outcomes (e.g., if YES trades at $0.60, YES=60%, NO=40%). **No external API calls required.**
-    3.  Format Rich Embed (Green for Buy, Red for Sell).
-    4.  Send to Discord.
+### 3. Bot Service (`src/index.js`)
+*   **Role**: User-facing interface (Discord + API) and notification processing.
+*   **Components**:
+    *   **Trade Worker**: Consumes jobs from Redis, calculates probabilities, and sends Discord notifications.
+    *   **Discord Bot**: Handles commands (`!add`, `!remove`) and interactive components.
+    *   **API**: REST endpoints for administrative control.
+*   **Logic**:
+    *   When a user adds a market, it publishes an event via Redis Pub/Sub. The Ingest Service picks this up and subscribes to the new market dynamically.
 
 ### 4. Market Registry -- `src/database/marketRegistry.js`
 *   **Role**: Persistent storage for tracked markets and bot settings.

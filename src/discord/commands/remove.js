@@ -38,7 +38,17 @@ export async function execute(interaction) {
     try {
         const response = await fetch(`http://localhost:${config.port}/api/events/${slug}`, {
             method: 'DELETE',
-            headers: { 'x-api-key': config.adminApiKey }
+            headers: {
+                'x-api-key': config.adminApiKey,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                guildId: interaction.guildId,
+                guildName: interaction.guild?.name || 'Unknown Server',
+                channelId: interaction.channelId,
+                channelName: interaction.channel?.name || 'Unknown Channel',
+                user: interaction.user.tag
+            })
         });
         const data = await response.json();
 

@@ -4,18 +4,26 @@ Monitor Polymarket smart contracts for large transactions and get Discord notifi
 
 ## Quick Start
 
-1. Install Bun:
+
+1. **Docker Compose (Recommended)**
    ```bash
-   curl -fsSL https://bun.sh/install | bash
+   # Configure .env first (see below)
+   docker-compose up -d --build
    ```
 
-2. Install dependencies:
+2. **Manual Setup**
+   
+   Prerequisites:
+   - [Bun](https://bun.sh)
+   - Redis (running on default port 6379)
+   - PostgreSQL (running on default port 5432)
+
+   Install dependencies:
    ```bash
    bun install
    ```
 
-3. Configure `.env`:
-   ```env
+   Configure `.env`:
    ```env
    PORT=3000
    
@@ -33,12 +41,23 @@ Monitor Polymarket smart contracts for large transactions and get Discord notifi
    REDIS_HOST=localhost
    REDIS_PORT=6379
    
+   # Postgres Configuration
+   POSTGRES_HOST=localhost
+   POSTGRES_PORT=5432
+   POSTGRES_USER=admin
+   POSTGRES_PASSWORD=adminpassword
+   POSTGRES_DB=polymarket
+   
    # Admin Security
    ADMIN_API_KEY=changeme
    ```
 
-4. Run:
+   Run the services (in separate terminals):
    ```bash
+   # Terminal 1: Ingestion Service (Monitors markets)
+   bun run start:ingest
+   
+   # Terminal 2: Discord Bot (Sends notifications)
    bun start
    ```
 
@@ -77,8 +96,7 @@ curl -X DELETE http://localhost:3000/api/events/presidential-election-2024 \
 
 ## How It Works
 
-1. **Market Monitoring**: connect to Polymarket's **CLOB (Central Limit Order Book)** via WebSocket for real-time trade data.
-2. **Filtering**: Trades are filtered by the `MIN_AMOUNT_THRESHOLD`.
-3. **Queueing**: Valid trades are pushed to a **Redis Queue** for reliable processing.
-4. **Processing**: Workers pick up trades, calculate implied probabilities locally (YES + NO = 100%), and format Discord embeds.
-5. **Notification**: Alerts are sent to the configured Discord channel.
+1. **Ingestion Service**: Connects to Polymarket's **CLOB (Central Limit Order Book)** via WebSocket for real-time trade data. It filters trades by `MIN_AMOUNT_THRESHOLD` and pushes valid trades to a **Redis Queue**.
+2. **Redis**: Acts as a message broker between the ingestion service and the bot.
+3. **Bot Service**: Consumes trades from Redis, calculates implied probabilities locally (YES + NO = 100%), and formats Discord embeds.
+4. **Notification**: Alerts are sent to the configured Discord channel.

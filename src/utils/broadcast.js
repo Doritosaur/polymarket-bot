@@ -9,7 +9,9 @@ const CHANNEL = 'bot_events';
 export const EventType = {
     MARKET_ADDED: 'MARKET_ADDED',
     MARKET_REMOVED: 'MARKET_REMOVED',
-    THRESHOLD_UPDATED: 'THRESHOLD_UPDATED'
+    THRESHOLD_UPDATED: 'THRESHOLD_UPDATED',
+    MARKET_SEARCHED: 'MARKET_SEARCHED',
+    EVENT_SEARCHED: 'EVENT_SEARCHED'
 };
 
 export async function publishEvent(type, payload) {

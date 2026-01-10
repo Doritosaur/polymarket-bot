@@ -16,13 +16,15 @@
   "license": "ISC",
   "dependencies": {
     "bullmq": "^5.66.4",
+    "cors": "^2.8.5",
     "discord.js": "^14.14.1",
     "dotenv": "^16.3.1",
     "ethers": "^6.9.0",
     "express": "^4.22.1",
     "fuse.js": "^7.1.0",
     "ioredis": "^5.9.0",
-    "pg": "^8.16.3"
+    "pg": "^8.16.3",
+    "socket.io": "^4.8.3"
   },
   "devDependencies": {
     "@types/pg": "^8.16.0"

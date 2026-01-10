@@ -3,6 +3,7 @@ import { marketRegistry } from '../../database/marketRegistry.js';
 import { getEvent } from '../../utils/gammaClient.js';
 import { createEventEmbed } from '../formatters.js';
 import { extractSlug } from '../../utils/formatting.js';
+import { publishEvent, EventType } from '../../utils/broadcast.js';
 
 export const data = new SlashCommandBuilder()
     .setName('event')
@@ -49,6 +50,12 @@ export async function execute(interaction) {
         if (markets.length > 25) {
             embed.setFooter({ text: `Showing top 25 of ${markets.length} markets. | Event: ${data.slug}` });
         }
+
+        publishEvent(EventType.EVENT_SEARCHED, {
+            slug: data.slug,
+            title: data.title,
+            user: interaction.user.tag
+        });
 
         await interaction.editReply({ embeds: [embed] });
 
