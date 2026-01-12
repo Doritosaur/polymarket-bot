@@ -75,6 +75,14 @@ services:
     depends_on:
       - bot
 
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: polymarket-cloudflared
+    restart: always
+    command: tunnel run
+    environment:
+      - TUNNEL_TOKEN=${TUNNEL_TOKEN}
+
 volumes:
   redis_data:
   postgres_data:
