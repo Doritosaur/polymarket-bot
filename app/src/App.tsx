@@ -72,6 +72,7 @@ function App() {
 
         socket.on('pins_response', onPinsResponse);
         socket.on('pin_toggled', onPinToggled);
+        // socket.on('tag_locations', onTagLocations); // Deprecated
 
         const onConnect = () => {
             setStatus('Connected');
@@ -101,7 +102,7 @@ function App() {
 
         const onEvent = (data: { type: string; payload: any, timestamp: number }) => {
             if (data.type !== 'MARKET_SNAPSHOT' && data.type !== 'trade_update' && data.type !== 'TRADE') {
-                console.log(data.type, data.payload);
+                // console.log(data.type, data.payload);
             }
 
             if (data.type === 'MARKET_SNAPSHOT') {
@@ -110,13 +111,15 @@ function App() {
                         conditionId: m.condition_id,
                         question: m.description || m.question || 'Unknown Market',
                         slug: m.slug,
+                        eventSlug: m.event_slug,
                         image: m.image,
                         endDate: m.end_date,
                         yesAssetId: m.yes_asset_id,
                         noAssetId: m.no_asset_id,
                         yesPrice: m.yes_price || 0.5,
                         noPrice: m.no_price || 0.5,
-                        history: []
+                        history: [],
+                        tags: m.tags || [] // Category tags from API
                     }));
                     setSnapshot(mappedMarkets);
                 }
@@ -131,7 +134,7 @@ function App() {
                 addTrade({
                     id: Math.random().toString(),
                     price: parseFloat(trade.price),
-                    size: parseFloat(trade.size),
+                    size: parseFloat(trade.size || '0'),
                     side: trade.side,
                     timestamp: data.timestamp || Date.now(),
                     outcome: trade.outcome,
@@ -230,7 +233,7 @@ function App() {
                     <div className="flex items-center gap-4 pointer-events-auto">
                         <div className="text-right mr-4">
                             <p className="text-xs text-primary/70 uppercase tracking-widest">Monitored Zones</p>
-                            <p className="text-lg font-mono font-bold text-primary">&gt; {markets.length}</p>
+                            <p className="text-lg font-mono font-bold text-primary">&gt; {new Set(markets.map(m => m.eventSlug || m.conditionId)).size}</p>
                         </div>
                         <WhaleFeedPopover />
                     </div>

@@ -5,6 +5,159 @@ import { broadcast } from '../utils/broadcast.js';
 
 const WS_URL = config.clobWsUrl;
 
+class TradeProcessor {
+    constructor(broadcaster, aggregator, subscribedAssets) {
+        this.broadcaster = broadcaster;
+        this.aggregator = aggregator;
+        this.subscribedAssets = subscribedAssets;
+
+        // Layer 1: Hash duplication detection (Primary Defense)
+        // Checks if EXACT same message ID appears within 5 seconds
+        this.recentHashes = new Map(); // hash -> timestamp
+        this.HASH_TTL = 5000; // 5 seconds
+
+        // Layer 2: Signature duplication detection (Ultra-Short Debounce)
+        // Checks if IDENTICAL trade details appear within 500ms
+        // Catches server retransmits/bugs without blocking legitimate rapid trades
+        this.recentSignatures = new Map(); // signature -> timestamp
+        this.SIG_TTL = 500; // 500ms (Critical: Short window)
+
+        // Layer 3: History Tracking (for analysis/debugging)
+        this.tradeHistory = [];
+        this.MAX_HISTORY = 100;
+    }
+
+    processMessage(msg) {
+        // Heartbeat / Debug
+        if (msg.type !== 'pong' && !Array.isArray(msg)) {
+            // console.log('[CLOB] Received msg:', JSON.stringify(msg).substring(0, 100)); 
+        }
+
+        if (Array.isArray(msg)) {
+            for (const update of msg) this.processUpdate(update);
+        } else {
+            this.processUpdate(msg);
+        }
+    }
+
+    processUpdate(update) {
+        if (!update) return;
+        if (update.type === "pong") return;
+
+        // 1. Recursive handling for "price_change" (orderbook updates)
+        if (update.price_changes && Array.isArray(update.price_changes)) {
+            for (const change of update.price_changes) {
+                // Determine asset_id from change or parent
+                const subUpdate = {
+                    ...change,
+                    timestamp: update.timestamp,
+                    event_type: update.event_type,
+                    hash: update.hash // Propagate hash if available on parent
+                };
+                this.processUpdate(subUpdate);
+            }
+            return;
+        }
+
+        // 2. Resolve Asset ID
+        if (!update.asset_id && update.token_id) update.asset_id = update.token_id;
+        if (!update.asset_id) return;
+
+        const assetInfo = this.subscribedAssets.get(update.asset_id);
+        if (!assetInfo) return; // Ignore unknown
+
+        // 3. STRICT TRADE DETECTION
+        // Criteria:
+        // A. Must be 'last_trade_price' event
+        // B. Must have valid dimensions (price, size > 0, side)
+        // C. Must not be a duplicate (check hash & signature)
+
+        const isTradeEvent = update.event_type === 'last_trade_price';
+        const sizeNum = parseFloat(update.size || 0);
+        const hasValidData = update.price && sizeNum > 0 && update.side;
+
+        if (isTradeEvent && hasValidData) {
+            const now = Date.now();
+            const tradeTs = update.timestamp ? parseInt(update.timestamp) : now;
+
+            // LAYER 1: Hash-Based De-duplication (Primary)
+            if (update.hash) {
+                const lastSeen = this.recentHashes.get(update.hash);
+                // If seen recently, block it
+                if (lastSeen && (now - lastSeen) < this.HASH_TTL) {
+                    // console.log(`[CLOB] Skipping duplicate trade hash (Recent): ${update.hash}`);
+                    return;
+                }
+                // Update timestamp (refresh or new)
+                this.recentHashes.set(update.hash, now);
+                this.pruneOldEntries(this.recentHashes, this.HASH_TTL);
+            }
+
+            // LAYER 2: Pattern-Based De-duplication (Signature - Ultra Short)
+            const signature = `${update.asset_id}|${update.price}|${update.size}|${update.side}`;
+            const lastSigSeen = this.recentSignatures.get(signature);
+
+            // If identical trade details seen within 500ms, debounce it
+            if (lastSigSeen && (now - lastSigSeen) < this.SIG_TTL) {
+                console.log(`[CLOB] ⚠️  Debouncing duplicate within ${now - lastSigSeen}ms (Sig: ${signature})`);
+                return;
+            }
+
+            // Update signature timestamp AFTER check passes
+            this.recentSignatures.set(signature, now);
+            this.pruneOldEntries(this.recentSignatures, this.SIG_TTL);
+
+            console.log(`[CLOB] 💰 TRADE DETECTED: ${update.asset_id} Price: ${update.price} Size: ${update.size}`);
+
+            // Update local price cache
+            assetInfo.lastPrice = parseFloat(update.price);
+
+            // History Tracking
+            this.tradeHistory.push({
+                signature,
+                timestamp: tradeTs,
+                hash: update.hash
+            });
+            if (this.tradeHistory.length > this.MAX_HISTORY) {
+                this.tradeHistory.shift();
+            }
+
+            // Prepare validated trade data
+            const tradeData = {
+                asset_id: update.asset_id,
+                price: update.price,
+                size: update.size,
+                side: update.side,
+                timestamp: tradeTs,
+                outcome: assetInfo.outcome,
+                market_question: assetInfo.question,
+                market_slug: assetInfo.slug,
+                market_condition_id: assetInfo.conditionId,
+                hash: update.hash
+            };
+
+            this.broadcaster('TRADE', tradeData);
+
+            this.aggregator.processTrade({
+                price: parseFloat(update.price),
+                size: parseFloat(update.size),
+                side: update.side,
+                timestamp: tradeTs,
+                assetInfo
+            });
+        }
+    }
+
+    pruneOldEntries(map, ttl) {
+        const now = Date.now();
+        for (const [key, timestamp] of map.entries()) {
+            if (now - timestamp > ttl) {
+                map.delete(key);
+            }
+        }
+    }
+}
+
 class ClobListener {
     constructor() {
         this.ws = null;
@@ -15,6 +168,7 @@ class ClobListener {
         this.reconnectTimeout = null;
 
         this.aggregator = new TradeAggregator();
+        this.processor = new TradeProcessor(broadcast, this.aggregator, this.subscribedAssets);
     }
 
     async start(specifiedConditionId = null) {
@@ -43,9 +197,9 @@ class ClobListener {
         } else {
             // Only load all active if we are starting fresh or don't have them
             if (this.subscribedAssets.size === 0) {
-                // We use getWatchedMarkets now because we only want to subscribe to markets the user explicitly watches.
-                // The DB might contain thousands of "active" markets (fetched from API), but we don't want to track all of them.
-                marketsToLoad = await marketRegistry.getWatchedMarkets();
+                // switch back to ALL active markets for Whale Feed to work globally
+                marketsToLoad = await marketRegistry.getActiveMarkets();
+                console.log(`[CLOB] Startup: Loaded ${marketsToLoad.length} ACTIVE markets (Global Mode).`);
             }
         }
 
@@ -101,6 +255,7 @@ class ClobListener {
                         type: "market",
                         assets_ids: batch
                     };
+                    console.log(`[CLOB] Sending Subscribe Payload:`, JSON.stringify(subscribeMsg).substring(0, 200) + '...');
                     this.ws.send(JSON.stringify(subscribeMsg));
 
                     // Also subscribe to TRADES
@@ -126,7 +281,7 @@ class ClobListener {
                     return;
                 }
                 const msg = JSON.parse(event.data);
-                this.handleMessage(msg);
+                this.processor.processMessage(msg);
             } catch (error) {
                 console.error('Error handling WebSocket message:', error);
             }
@@ -156,7 +311,7 @@ class ClobListener {
                 if (market.clob_token_ids) {
                     try {
                         const tokenIds = JSON.parse(market.clob_token_ids);
-                        if (Array.isArray(tokenIds) && tokenIds.length >= 2) {
+                        if (Array.isArray(tokenIds) && tokenIds.length >= 2 && tokenIds[0] && tokenIds[1]) {
                             yes = tokenIds[0].toString();
                             no = tokenIds[1].toString();
                         } else {
@@ -209,90 +364,9 @@ class ClobListener {
         this.aggregator.setGlobalThreshold(val);
     }
 
-    handleMessage(msg) {
-        // console.log('[CLOB] Received msg:', JSON.stringify(msg).substring(0, 500));
-        if (Array.isArray(msg)) {
-            for (const update of msg) this.processUpdate(update);
-        } else {
-            this.processUpdate(msg);
-        }
-    }
 
-    async processUpdate(update) {
-        if (!update) return;
-        if (update.type === "pong") return;
 
-        // 1. Handle "price_change" event (Array of changes)
-        if (update.price_changes && Array.isArray(update.price_changes)) {
-            // console.log(`[CLOB] unpacking price_changes (${update.price_changes.length})`);
-            for (const change of update.price_changes) {
-                // Determine asset_id from change or parent? 
-                // Log shows items in array have keys.
-                // We'll treat 'change' as a sub-update, inheriting timestamp/event_type if needed
-                const subUpdate = { ...change, timestamp: update.timestamp, event_type: update.event_type };
-                this.processUpdate(subUpdate);
-            }
-            return;
-        }
 
-        // 2. Resolve Asset ID (support token_id alias)
-        if (!update.asset_id && update.token_id) update.asset_id = update.token_id;
-
-        if (!update.asset_id) {
-            // Only log if it's NOT a container event we already handled
-            if (!update.price_changes) {
-                // console.warn('[CLOB] Update missing asset_id:', Object.keys(update));
-            }
-            return;
-        }
-
-        const assetInfo = this.subscribedAssets.get(update.asset_id);
-        if (!assetInfo) return; // Ignore unknown
-        // 3. Handle Trade or Price Update
-        // Trade events from 'last_trade_price' channel have: price, size, side, hash
-        // Orderbook events from 'market' channel ALSO have price, size, side BUT include best_bid/best_ask
-        // Key distinction:
-        //   - Real trades: size > 0, NO best_bid field
-        //   - Orderbook quotes: may have size=0 OR have best_bid field
-
-        // DEBUG: Log event structure to verify detection accuracy
-        // if (update.price || update.best_bid || update.changes) {
-        //     console.log(`[CLOB] Event: price=${update.price}, size=${update.size}, side=${update.side}, best_bid=${update.best_bid}, best_ask=${update.best_ask}, hash=${update.hash?.substring(0, 10)}`);
-        // }
-
-        // Trade detection: ALL events have best_bid/best_ask, so can't use absence.
-        // Real trades: size > 0 (actual quantity traded)
-        // Orderbook quotes: size = 0 (no actual trade)
-        const sizeNum = parseFloat(update.size || 0);
-        const isTrade = update.price && sizeNum > 0 && update.side;
-
-        if (isTrade) {
-            console.log(`[CLOB] 💰 TRADE DETECTED: ${update.asset_id} Price: ${update.price} Size: ${update.size}`);
-            assetInfo.lastPrice = parseFloat(update.price);
-
-            const tradeData = {
-                asset_id: update.asset_id,
-                price: update.price,
-                size: update.size,
-                side: update.side,
-                timestamp: update.timestamp || Date.now(),
-                outcome: assetInfo.outcome,
-                market_question: assetInfo.question,
-                market_slug: assetInfo.slug,
-                market_condition_id: assetInfo.conditionId
-            };
-
-            broadcast('TRADE', tradeData);
-
-            this.aggregator.processTrade({
-                price: parseFloat(update.price),
-                size: parseFloat(update.size),
-                side: update.side,
-                timestamp: update.timestamp || Date.now(),
-                assetInfo
-            });
-        }
-    }
 
     stop(clearPending = true) {
         this.shouldReconnect = false;

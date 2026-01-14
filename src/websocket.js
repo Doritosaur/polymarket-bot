@@ -103,6 +103,16 @@ export function initializeWebSockets(server) {
             }
         });
 
+        // Handle Tag Locations Request
+        socket.on('get_tag_locations', async () => {
+            try {
+                const tagLocations = await marketRegistry.getTagLocations();
+                socket.emit('tag_locations', tagLocations);
+            } catch (err) {
+                console.error("Error fetching tag locations:", err);
+            }
+        });
+
         socket.on('register', async (data) => {
             const { username, password } = data;
             try {

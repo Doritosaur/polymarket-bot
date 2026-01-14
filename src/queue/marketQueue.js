@@ -39,6 +39,11 @@ async function fetchAllActiveMarkets(onBatch) {
             for (const event of events) {
                 if (!event.markets) continue;
 
+                // Extract tags from event level (array of {label, slug})
+                const eventTags = Array.isArray(event.tags)
+                    ? event.tags.map(t => t.slug).filter(Boolean)
+                    : [];
+
                 for (const market of event.markets) {
                     if (market.active && !market.closed) {
                         let clobTokenIds = market.clobTokenIds;
@@ -57,6 +62,7 @@ async function fetchAllActiveMarkets(onBatch) {
                             endDate: market.endDateIso || market.endDate,
                             image: market.image || event.image,
                             groupDate: market.groupItemTitle,
+                            tags: eventTags, // Add tags from event
                             active: true
                         });
 
@@ -102,6 +108,7 @@ async function startMarketWorker() {
             let totalSynced = 0;
 
             const allActiveConditionIds = new Set();
+            const allDiscoveredTags = new Set(); // Track all tags for DB sync
 
             await fetchAllActiveMarkets(async (batch) => {
                 if (batch.length === 0) return;
@@ -120,8 +127,13 @@ async function startMarketWorker() {
                     }));
                     await clobListener.addMarkets(marketsForListener);
 
-                    // Track active IDs
-                    batch.forEach(m => allActiveConditionIds.add(m.conditionId));
+                    // Track active IDs and discovered tags
+                    batch.forEach(m => {
+                        allActiveConditionIds.add(m.conditionId);
+                        if (m.tags && Array.isArray(m.tags)) {
+                            m.tags.forEach(tag => allDiscoveredTags.add(tag));
+                        }
+                    });
 
                     totalSynced += batch.length;
                     console.log(`[MarketFetch] Synced batch of ${batch.length} markets (Total: ${totalSynced})`);
@@ -131,6 +143,12 @@ async function startMarketWorker() {
             });
 
             console.log(`[MarketFetch] Sync cycle complete. Total synced: ${totalSynced}`);
+
+            // SYNC DISCOVERED TAGS TO DB
+            if (allDiscoveredTags.size > 0) {
+                await marketRegistry.upsertTags(Array.from(allDiscoveredTags));
+                console.log(`[MarketFetch] Synced ${allDiscoveredTags.size} unique tags to database.`);
+            }
 
             // CLEANUP ZOMBIES
             if (totalSynced > 0 && allActiveConditionIds.size > 0) {

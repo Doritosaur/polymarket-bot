@@ -14,8 +14,8 @@ export function WhaleFeedPopover() {
     const setThreshold = useMarketStore((s) => s.setTradeThreshold);
     const [isOpen, setIsOpen] = useState(false);
 
-    // Filter trades by user's threshold
-    const filteredTrades = trades.filter((t) => t.size >= threshold);
+    // Filter trades by user's threshold (Dollar Value)
+    const filteredTrades = trades.filter((t) => (t.size * t.price) >= threshold);
     const unreadCount = filteredTrades.length;
 
     return (
@@ -148,7 +148,7 @@ export function WhaleFeedPopover() {
                                                 <div className="flex items-center gap-1 font-bold">
                                                     <span className="text-primary/50">Value:</span>
                                                     <span className="text-primary">
-                                                        ${trade.size.toLocaleString()}
+                                                        ${(trade.size * trade.price).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                     </span>
                                                 </div>
                                             </div>

@@ -62,7 +62,8 @@ class MarketRegistry {
                     watched INTEGER DEFAULT 0,
                     end_date TEXT,
                     image TEXT,
-                    group_date TEXT
+                    group_date TEXT,
+                    tags TEXT[]
                 );
             `);
 
@@ -140,6 +141,19 @@ class MarketRegistry {
                 );
             `);
 
+            // 8. TAGS (Dynamic tag→location mapping)
+            await client.query(`
+                CREATE TABLE IF NOT EXISTS tags (
+                    id SERIAL PRIMARY KEY,
+                    slug VARCHAR(255) UNIQUE NOT NULL,
+                    label VARCHAR(255),
+                    lat REAL,
+                    lng REAL,
+                    auto_inferred BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            `);
+
             // Indices
             await client.query(`
                 CREATE INDEX IF NOT EXISTS idx_markets_condition_id ON markets(condition_id);
@@ -151,6 +165,7 @@ class MarketRegistry {
                 CREATE INDEX IF NOT EXISTS idx_market_tokens_token_id ON market_tokens(token_id);
                 CREATE INDEX IF NOT EXISTS idx_subscriptions_composite ON subscriptions(guild_id, channel_id);
                 CREATE INDEX IF NOT EXISTS idx_user_pins_user_id ON user_pins(user_id);
+                CREATE INDEX IF NOT EXISTS idx_tags_slug ON tags(slug);
             `);
 
             await client.query('COMMIT');
@@ -272,8 +287,8 @@ class MarketRegistry {
 
             // When setWatched is false, preserve existing watched value; otherwise set to 1
             const marketQuery = `
-                INSERT INTO markets (condition_id, slug, description, event_slug, threshold, end_date, image, group_date, active, watched, updated_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, ${options.setWatched ? '1' : 'COALESCE((SELECT watched FROM markets WHERE condition_id = $1::varchar), 0)'}, CURRENT_TIMESTAMP)
+                INSERT INTO markets (condition_id, slug, description, event_slug, threshold, end_date, image, group_date, tags, active, watched, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, ${options.setWatched ? '1' : 'COALESCE((SELECT watched FROM markets WHERE condition_id = $1::varchar), 0)'}, CURRENT_TIMESTAMP)
                 ON CONFLICT(condition_id) DO UPDATE SET
                     slug = COALESCE(EXCLUDED.slug, markets.slug),
                     description = COALESCE(EXCLUDED.description, markets.description),
@@ -282,6 +297,7 @@ class MarketRegistry {
                     end_date = COALESCE(EXCLUDED.end_date, markets.end_date),
                     image = COALESCE(EXCLUDED.image, markets.image),
                     group_date = COALESCE(EXCLUDED.group_date, markets.group_date),
+                    tags = COALESCE(EXCLUDED.tags, markets.tags),
                     active = 1,
                     ${options.setWatched ? 'watched = 1,' : ''}
                     updated_at = CURRENT_TIMESTAMP
@@ -305,6 +321,9 @@ class MarketRegistry {
 
                 const normalizedConditionId = this.normalizeConditionId(market.conditionId);
 
+                // Ensure tags is an array or null
+                const tags = Array.isArray(market.tags) ? market.tags : null;
+
                 await client.query(marketQuery, [
                     normalizedConditionId,
                     market.slug,
@@ -313,7 +332,8 @@ class MarketRegistry {
                     threshold,
                     market.endDate,
                     market.image,
-                    market.groupDate
+                    market.groupDate,
+                    tags
                 ]);
 
                 // Handle Tokens & Prices
@@ -521,7 +541,7 @@ class MarketRegistry {
         // doing JSON.parse(clob_token_ids).
         const res = await this.pool.query(`
             SELECT m.*, 
-                   json_agg(t.token_id ORDER BY t.outcome DESC) as clob_token_ids_json,
+                   COALESCE(json_agg(t.token_id ORDER BY t.outcome DESC) FILTER (WHERE t.token_id IS NOT NULL), '[]') as clob_token_ids_json,
                    MAX(CASE WHEN t.outcome = 'YES' THEN t.price END) as yes_price,
                    MAX(CASE WHEN t.outcome = 'NO' THEN t.price END) as no_price,
                    MAX(CASE WHEN t.outcome = 'YES' THEN t.token_id END) as yes_asset_id,
@@ -643,6 +663,13 @@ class MarketRegistry {
 
     async toggleUserPin(userId, conditionId) {
         const normalized = this.normalizeConditionId(conditionId);
+
+        // First, verify user exists to prevent FK violations from stale auth tokens
+        const userCheck = await this.pool.query(`SELECT id FROM users WHERE id = $1`, [userId]);
+        if (userCheck.rows.length === 0) {
+            throw new Error(`User ID ${userId} not found. Please log out and log in again.`);
+        }
+
         const check = await this.pool.query(
             `SELECT 1 FROM user_pins WHERE user_id = $1 AND condition_id = $2`,
             [userId, normalized]
@@ -652,7 +679,6 @@ class MarketRegistry {
             await this.pool.query(`DELETE FROM user_pins WHERE user_id = $1 AND condition_id = $2`, [userId, normalized]);
             return false;
         } else {
-            // Check if market exists effectively? FK handles it, but maybe verify?
             await this.pool.query(`INSERT INTO user_pins (user_id, condition_id) VALUES ($1, $2)`, [userId, normalized]);
             return true;
         }
@@ -690,6 +716,26 @@ class MarketRegistry {
             clob_token_ids: JSON.stringify(row.clob_token_ids_json)
         }));
         return res.rows;
+    }
+    // --- Tags ---
+
+    async upsertTags(tagSlugs) {
+        if (!tagSlugs || tagSlugs.length === 0) return;
+
+        const uniqueSlugs = [...new Set(tagSlugs.filter(Boolean))];
+
+        for (const slug of uniqueSlugs) {
+            await this.pool.query(`
+                INSERT INTO tags (slug)
+                VALUES ($1)
+                ON CONFLICT (slug) DO NOTHING
+            `, [slug]);
+        }
+    }
+
+    async getTagLocations() {
+        // Deprecated: Coordinate source of truth moved to frontend (GeoMapper.ts)
+        return {};
     }
 
     async close() {

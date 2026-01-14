@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.0.0",
+    "@deck.gl/aggregation-layers": "^9.2.5",
     "@deck.gl/core": "^9.0.0",
     "@deck.gl/layers": "^9.0.0",
     "@deck.gl/react": "^9.0.0",
@@ -25,6 +26,7 @@
     "d3-scale": "^4.0.2",
     "d3-selection": "^3.0.0",
     "d3-transition": "^3.0.1",
+    "fuse.js": "^7.1.0",
     "lucide-react": "^0.562.0",
     "prop-types": "^15.8.1",
     "radix-ui": "^1.4.3",
