@@ -1,6 +1,7 @@
 import { Queue, Worker } from 'bullmq';
 import { config } from '../config.js';
 import { marketRegistry } from '../database/marketRegistry.js';
+import { clobListener } from '../clob/clobListener.js';
 
 const connection = {
     host: config.redisHost,
@@ -50,6 +51,7 @@ async function fetchAllActiveMarkets(onBatch) {
                             slug: market.slug,
                             description: market.description || event.description,
                             clobTokenIds: clobTokenIds,
+                            outcomePrices: market.outcomePrices, // Add this
                             eventSlug: event.slug,
                             threshold: null,
                             endDate: market.endDateIso || market.endDate,
@@ -99,19 +101,46 @@ async function startMarketWorker() {
         try {
             let totalSynced = 0;
 
+            const allActiveConditionIds = new Set();
+
             await fetchAllActiveMarkets(async (batch) => {
                 if (batch.length === 0) return;
                 try {
                     // Perform upsert for this batch
-                    await marketRegistry.upsertMarkets(batch, { fullSync: false }); // Partial sync
+                    // IMPORTANT: Set active=1 but DO NOT set watched=1
+                    await marketRegistry.upsertMarkets(batch, { fullSync: false, setWatched: false });
+
+                    // FEED DIRECTLY TO LISTENER
+                    // Convert batch to listener format
+                    const marketsForListener = batch.map(m => ({
+                        conditionId: m.conditionId,
+                        slug: m.slug,
+                        threshold: m.threshold,
+                        clobTokenIds: m.clobTokenIds // string or object
+                    }));
+                    await clobListener.addMarkets(marketsForListener);
+
+                    // Track active IDs
+                    batch.forEach(m => allActiveConditionIds.add(m.conditionId));
+
                     totalSynced += batch.length;
                     console.log(`[MarketFetch] Synced batch of ${batch.length} markets (Total: ${totalSynced})`);
                 } catch (dbErr) {
-                    console.error(`[MarketFetch] Batch upsert failed:`, dbErr);
+                    console.error(`[MarketFetch] Batch upsert failed (Batch Size: ${batch.length}):`, dbErr);
                 }
             });
 
             console.log(`[MarketFetch] Sync cycle complete. Total synced: ${totalSynced}`);
+
+            // CLEANUP ZOMBIES
+            if (totalSynced > 0 && allActiveConditionIds.size > 0) {
+                const removedCount = await marketRegistry.deactivateStaleMarkets(Array.from(allActiveConditionIds));
+                if (removedCount > 0) {
+                    console.log(`[MarketFetch] Cleanup: Deactivated ${removedCount} zombie markets.`);
+                    // Optional: Broadcast event to trigger CLOB reload?
+                    // broadcast('ZOMBIE_CLEANUP', { count: removedCount }); 
+                }
+            }
 
         } catch (error) {
             console.error(`[MarketFetch] Job failed:`, error);

@@ -2,7 +2,7 @@ import { clobListener } from '../clob/clobListener.js';
 import { marketRegistry } from '../database/marketRegistry.js';
 import { initializeMarketFetcher, closeMarketQueue } from '../queue/marketQueue.js';
 import { closeNotificationQueue } from '../queue/notificationQueue.js';
-import { subscribeToEvents, EventType } from '../utils/broadcast.js';
+import { subscribeToEvents, EventType, broadcast } from '../utils/broadcast.js';
 
 async function start() {
     try {
@@ -12,12 +12,16 @@ async function start() {
 
         await clobListener.initialize();
 
+        // await globalMonitor.start();
+        console.log('[Ingest] MarketQueue now driving Global Watch (Event-Driven).');
+
         // Start the Market Fetcher Cron
         await initializeMarketFetcher();
 
+        // ... (subscribe logic)
+
         // Subscribe to inter-service events
         subscribeToEvents(async (type, payload) => {
-            console.log(`[Ingest] Received Event: ${type}`);
             try {
                 switch (type) {
                     case EventType.MARKET_ADDED:
@@ -51,6 +55,7 @@ async function start() {
 async function shutdown() {
     console.log('\n[Ingest] Shutting down gracefully...');
 
+    // await globalMonitor.stop();
     await clobListener.cleanup();
     await closeMarketQueue();
     await closeNotificationQueue();

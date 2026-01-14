@@ -1,6 +1,7 @@
 import { marketRegistry } from '../database/marketRegistry.js';
 import { config } from '../config.js';
 import { TradeAggregator } from './TradeAggregator.js';
+import { broadcast } from '../utils/broadcast.js';
 
 const WS_URL = config.clobWsUrl;
 
@@ -90,12 +91,26 @@ class ClobListener {
             this.reconnectAttempts = 0;
 
             if (assetIds.length > 0) {
-                const subscribeMsg = {
-                    type: "market",
-                    assets_ids: assetIds
-                };
-                this.ws.send(JSON.stringify(subscribeMsg));
-                console.log(`Sent subscription request for ${assetIds.length} assets`);
+                // Batch subscriptions to avoid frame limit issues
+                const BATCH_SIZE = 500;
+                let batchCount = 0;
+
+                for (let i = 0; i < assetIds.length; i += BATCH_SIZE) {
+                    const batch = assetIds.slice(i, i + BATCH_SIZE);
+                    const subscribeMsg = {
+                        type: "market",
+                        assets_ids: batch
+                    };
+                    this.ws.send(JSON.stringify(subscribeMsg));
+
+                    // Also subscribe to TRADES
+                    this.ws.send(JSON.stringify({
+                        type: "last_trade_price",
+                        assets_ids: batch
+                    }));
+                    batchCount++;
+                }
+                console.log(`Sent subscription request for ${assetIds.length} assets in ${batchCount} batches.`);
             }
 
             this.pingInterval = setInterval(() => {
@@ -144,8 +159,15 @@ class ClobListener {
                         if (Array.isArray(tokenIds) && tokenIds.length >= 2) {
                             yes = tokenIds[0].toString();
                             no = tokenIds[1].toString();
+                        } else {
+                            console.warn(`[CLOB] Market ${market.condition_id} has invalid token format:`, market.clob_token_ids);
                         }
-                    } catch (e) { /* ignore */ }
+                    } catch (e) {
+                        // Only log error if not a simple string parsing issue of already parsed object
+                        console.warn(`[CLOB] Failed to parse tokens for ${market.condition_id}:`, e.message);
+                    }
+                } else {
+                    console.warn(`[CLOB] Market ${market.condition_id} has NO clob_token_ids.`);
                 }
 
                 if (!yes || !no) continue;
@@ -188,6 +210,7 @@ class ClobListener {
     }
 
     handleMessage(msg) {
+        // console.log('[CLOB] Received msg:', JSON.stringify(msg).substring(0, 500));
         if (Array.isArray(msg)) {
             for (const update of msg) this.processUpdate(update);
         } else {
@@ -196,18 +219,76 @@ class ClobListener {
     }
 
     async processUpdate(update) {
-        if (!update || !update.asset_id) return;
+        if (!update) return;
         if (update.type === "pong") return;
 
-        const assetInfo = this.subscribedAssets.get(update.asset_id);
-        if (!assetInfo) return; // Ignore if not tracked (e.g. removed market)
+        // 1. Handle "price_change" event (Array of changes)
+        if (update.price_changes && Array.isArray(update.price_changes)) {
+            // console.log(`[CLOB] unpacking price_changes (${update.price_changes.length})`);
+            for (const change of update.price_changes) {
+                // Determine asset_id from change or parent? 
+                // Log shows items in array have keys.
+                // We'll treat 'change' as a sub-update, inheriting timestamp/event_type if needed
+                const subUpdate = { ...change, timestamp: update.timestamp, event_type: update.event_type };
+                this.processUpdate(subUpdate);
+            }
+            return;
+        }
 
-        if (update.event_type === "last_trade_price") {
+        // 2. Resolve Asset ID (support token_id alias)
+        if (!update.asset_id && update.token_id) update.asset_id = update.token_id;
+
+        if (!update.asset_id) {
+            // Only log if it's NOT a container event we already handled
+            if (!update.price_changes) {
+                // console.warn('[CLOB] Update missing asset_id:', Object.keys(update));
+            }
+            return;
+        }
+
+        const assetInfo = this.subscribedAssets.get(update.asset_id);
+        if (!assetInfo) return; // Ignore unknown
+        // 3. Handle Trade or Price Update
+        // Trade events from 'last_trade_price' channel have: price, size, side, hash
+        // Orderbook events from 'market' channel ALSO have price, size, side BUT include best_bid/best_ask
+        // Key distinction:
+        //   - Real trades: size > 0, NO best_bid field
+        //   - Orderbook quotes: may have size=0 OR have best_bid field
+
+        // DEBUG: Log event structure to verify detection accuracy
+        // if (update.price || update.best_bid || update.changes) {
+        //     console.log(`[CLOB] Event: price=${update.price}, size=${update.size}, side=${update.side}, best_bid=${update.best_bid}, best_ask=${update.best_ask}, hash=${update.hash?.substring(0, 10)}`);
+        // }
+
+        // Trade detection: ALL events have best_bid/best_ask, so can't use absence.
+        // Real trades: size > 0 (actual quantity traded)
+        // Orderbook quotes: size = 0 (no actual trade)
+        const sizeNum = parseFloat(update.size || 0);
+        const isTrade = update.price && sizeNum > 0 && update.side;
+
+        if (isTrade) {
+            console.log(`[CLOB] 💰 TRADE DETECTED: ${update.asset_id} Price: ${update.price} Size: ${update.size}`);
+            assetInfo.lastPrice = parseFloat(update.price);
+
+            const tradeData = {
+                asset_id: update.asset_id,
+                price: update.price,
+                size: update.size,
+                side: update.side,
+                timestamp: update.timestamp || Date.now(),
+                outcome: assetInfo.outcome,
+                market_question: assetInfo.question,
+                market_slug: assetInfo.slug,
+                market_condition_id: assetInfo.conditionId
+            };
+
+            broadcast('TRADE', tradeData);
+
             this.aggregator.processTrade({
                 price: parseFloat(update.price),
                 size: parseFloat(update.size),
                 side: update.side,
-                timestamp: update.timestamp,
+                timestamp: update.timestamp || Date.now(),
                 assetInfo
             });
         }
@@ -265,31 +346,48 @@ class ClobListener {
     }
 
     async addMarkets(markets) {
-        console.log(`[CLOB] Adding batch of ${markets.length} markets incrementally...`);
-
         // extract condition IDs (handle both string IDs and objects)
-        const conditionIds = markets.map(m => m.condition_id || m);
+        const conditionIds = markets.map(m => m.conditionId || m.condition_id || m);
+        console.log(`[CLOB] addMarkets called with ${conditionIds.length} IDs.`);
 
         if (conditionIds.length === 0) return;
 
         // 1. Bulk Fetch full details from DB
         const fullMarkets = await marketRegistry.getMarketsByConditionIds(conditionIds);
+        console.log(`[CLOB] Fetched ${fullMarkets.length} full market details from DB.`);
 
         // 2. Register
         const newIds = this.registerMarkets(fullMarkets);
+        console.log(`[CLOB] Registered ${newIds.length} NEW asset IDs.`);
 
         // 3. Subscribe if connected
         if (this.ws && this.ws.readyState === WebSocket.OPEN && newIds.length > 0) {
-            this.ws.send(JSON.stringify({
-                type: "market",
-                assets_ids: newIds
-            }));
-            console.log(`[CLOB] Sent incremental batch subscription for ${newIds.length} assets.`);
+            // Batch subscriptions
+            const BATCH_SIZE = 500;
+            let batchCount = 0;
+            for (let i = 0; i < newIds.length; i += BATCH_SIZE) {
+                const batch = newIds.slice(i, i + BATCH_SIZE);
+                // Subscribe to Orderbook (Price Changes)
+                this.ws.send(JSON.stringify({
+                    type: "market",
+                    assets_ids: batch
+                }));
+                // Subscribe to Trades (Executions)
+                this.ws.send(JSON.stringify({
+                    type: "last_trade_price",
+                    assets_ids: batch
+                }));
+                batchCount++;
+            }
+            console.log(`[CLOB] Sent incremental subscription for ${newIds.length} assets in ${batchCount} batches.`);
+        } else if (!this.ws && newIds.length > 0) {
+            // If valid markets were added but we aren't connected, START.
+            console.log(`[CLOB] Not connected, starting listener with ${newIds.length} accumulated assets.`);
+            await this.start();
         }
     }
 
     async removeMarket(conditionId) {
-        console.log(`[CLOB] Removing market ${conditionId} locally (Lazy Unsubscribe)...`);
         // We don't send an Unsubscribe message (Polymarket doesn't strictly document "unsubscribe" for public data stream easily, 
         // or we just rely on filtering).
         // Simply removing from 'subscribedAssets' map ensures 'processUpdate' ignores future messages.
@@ -342,6 +440,10 @@ class ClobListener {
             }
         }
         console.log(`[CLOB] Updated threshold for ${count} assets in memory.`);
+    }
+
+    getAssets() {
+        return Array.from(this.subscribedAssets.values());
     }
 }
 

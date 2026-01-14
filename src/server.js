@@ -1,13 +1,28 @@
 import express from 'express';
+import jwt from 'jsonwebtoken';
 import { marketRegistry } from './database/marketRegistry.js';
 import { config } from './config.js';
 import { getEvent, getMarket } from './utils/gammaClient.js';
 import { publishEvent, EventType } from './utils/broadcast.js';
 
+const JWT_SECRET = process.env.JWT_SECRET || 'polymarket-bot-secret-change-me';
+const JWT_EXPIRES_IN = '7d';
+
 export function createServer() {
   const app = express();
 
   app.use(express.json());
+
+  // Enable CORS for dashboard
+  app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-api-key');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    if (req.method === 'OPTIONS') {
+      return res.sendStatus(200);
+    }
+    next();
+  });
 
   app.get('/health', (req, res) => {
     res.json({
@@ -17,6 +32,47 @@ export function createServer() {
     });
   });
 
+  // ============ AUTH ENDPOINTS ============
+  app.post('/api/auth/login', async (req, res) => {
+    try {
+      const { username, password } = req.body;
+      if (!username || !password) {
+        return res.status(400).json({ success: false, error: 'Username and password required' });
+      }
+
+      const user = await marketRegistry.authenticateUser(username, password);
+      if (!user) {
+        return res.status(401).json({ success: false, error: 'Invalid credentials' });
+      }
+
+      const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+      res.json({ success: true, user: { id: user.id, username: user.username }, token });
+    } catch (error) {
+      console.error('Login error:', error);
+      res.status(500).json({ success: false, error: 'Internal server error' });
+    }
+  });
+
+  app.post('/api/auth/register', async (req, res) => {
+    try {
+      const { username, password } = req.body;
+      if (!username || !password) {
+        return res.status(400).json({ success: false, error: 'Username and password required' });
+      }
+
+      const user = await marketRegistry.registerUser(username, password);
+      const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+      res.json({ success: true, user: { id: user.id, username: user.username }, token });
+    } catch (error) {
+      if (error.message.includes('already exists')) {
+        return res.status(409).json({ success: false, error: 'Username already exists' });
+      }
+      console.error('Register error:', error);
+      res.status(500).json({ success: false, error: 'Internal server error' });
+    }
+  });
+
+  // ============ ADMIN MIDDLEWARE ============
   // Middleware for API Key Authentication
   const requireAuth = (req, res, next) => {
     const apiKey = req.get('x-api-key');

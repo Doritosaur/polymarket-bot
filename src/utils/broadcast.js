@@ -16,12 +16,16 @@ export const EventType = {
 
 export async function publishEvent(type, payload) {
     try {
+        // console.log(`[Broadcast] Publishing event: ${type}`); // Verbose logging
         const message = JSON.stringify({ type, payload });
         await pub.publish(CHANNEL, message);
+        console.log(`[Broadcast] 📡 Sent ${type} event to Redis.`);
     } catch (err) {
         console.error('[Broadcast] Failed to publish event:', err);
     }
 }
+
+export const broadcast = publishEvent;
 
 export function subscribeToEvents(handler) {
     sub.subscribe(CHANNEL, (err) => {

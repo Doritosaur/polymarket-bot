@@ -1,5 +1,6 @@
 import { config as defaultConfig } from '../config.js';
 import { addNotification as defaultAddTradeToQueue } from '../queue/notificationQueue.js';
+import { broadcast } from '../utils/broadcast.js';
 
 export class TradeAggregator {
     constructor(deps = {}) {
@@ -71,25 +72,32 @@ export class TradeAggregator {
         const avgPrice = d.vwapNumerator / d.totalSize;
         const thresholdToUse = d.threshold || this.minAmountThreshold;
 
+        // Always create the event object
+        const tradeEvent = {
+            type: 'trade',
+            tradeType: d.tradeType,
+            conditionId: d.conditionId,
+            marketName: d.marketName,
+            question: d.question,
+            endDate: d.endDate,
+            image: d.image,
+            outcome: d.outcome,
+            amount: d.totalSize.toFixed(2),
+            price: avgPrice.toFixed(4),
+            value: d.totalValue.toFixed(2),
+            timestamp: d.timestamp,
+            isAggregated: d.count > 1,
+            fillCount: d.count
+        };
+
+        // 1. Broadcast to Frontend (ALWAYS)
+        // The frontend handles its own filtering.
+        broadcast('trade', tradeEvent);
+
+        // 2. Send to Discord (ONLY if above threshold)
         if (d.totalValue >= thresholdToUse) {
             console.log(`[TRADE_AGG] ${d.marketName} (${d.outcome}) ${d.tradeType}: $${d.totalValue.toFixed(2)} (Count: ${d.count}, AvgPrice: ${avgPrice.toFixed(4)})`);
-
-            this.addTradeToQueue({
-                type: 'trade',
-                tradeType: d.tradeType,
-                conditionId: d.conditionId,
-                marketName: d.marketName,
-                question: d.question,
-                endDate: d.endDate,
-                image: d.image,
-                outcome: d.outcome,
-                amount: d.totalSize.toFixed(2),
-                price: avgPrice.toFixed(4),
-                value: d.totalValue.toFixed(2),
-                timestamp: d.timestamp,
-                isAggregated: d.count > 1,
-                fillCount: d.count
-            });
+            this.addTradeToQueue(tradeEvent);
         }
     }
 
