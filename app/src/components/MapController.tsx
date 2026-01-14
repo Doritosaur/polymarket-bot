@@ -231,7 +231,7 @@ export function MapController() {
             data: glowData,
             getPosition: (d: any) => d.position,
             filled: true,
-            getFillColor: [...MAP_COLORS.cyberYellow, 255],
+            getFillColor: MAP_COLORS.blinkColor,
             stroked: false,
             radiusUnits: 'pixels',
             getRadius: (d: any) => {
@@ -262,7 +262,7 @@ export function MapController() {
             data: clusters.filter(f => f.properties.cluster),
             getPosition: (d: any) => d.geometry.coordinates,
             getFillColor: MAP_COLORS.clusterFill,
-            getLineColor: MAP_COLORS.cyberYellow,
+            getLineColor: MAP_COLORS.blinkColor,
             getLineWidth: 2,
             getRadius: 12,
             radiusScale: 1,
@@ -302,7 +302,7 @@ export function MapController() {
                 const isYes = prob > 0.5;
                 const alpha = 200 + Math.floor(Math.abs(prob - 0.5) * 2 * 55);
 
-                if (pinnedIds.has(m.conditionId)) return MAP_COLORS.pinned;
+                if (pinnedIds.has(m.conditionId)) return MAP_COLORS.pinColor;
                 return isYes ? [...MAP_COLORS.bullish, alpha] : [...MAP_COLORS.bearish, alpha];
             },
             getLineColor: (d: any) => {
@@ -364,9 +364,19 @@ export function MapController() {
                     if (object && !object.properties.cluster && object.properties.conditionId) {
                         const m = marketMap.get(object.properties.conditionId);
                         if (m) {
+                            // Hydrate groupMarkets if present
+                            let groupMarkets = object.properties.groupMarkets;
+                            if (groupMarkets && Array.isArray(groupMarkets)) {
+                                groupMarkets = groupMarkets.map((gm: any) => marketMap.get(gm.conditionId)).filter(Boolean);
+                            }
+
                             data = {
                                 ...object,
-                                properties: { ...object.properties, ...m }
+                                properties: {
+                                    ...object.properties,
+                                    ...m,
+                                    groupMarkets: groupMarkets || object.properties.groupMarkets
+                                }
                             };
                         }
                     }

@@ -82,12 +82,12 @@ export function PinnedFeed() {
                                                 </div>
                                                 <div className="flex items-center gap-2 mt-1 text-[10px]">
                                                     <div className="flex items-center gap-2 text-primary/70">
-                                                        <span className="font-bold text-primary">{formatMoney(markets.reduce((s, m) => s + (m.volume || 0), 0))}</span>
+                                                        <span className="font-bold text-primary">{formatMoney(markets.reduce((s, m) => s + (parseFloat(String(m.volume)) || 0), 0))}</span>
                                                         <span className="opacity-50 text-[9px] uppercase">VOL</span>
                                                     </div>
                                                     <span className="text-primary/30">|</span>
                                                     <div className="flex items-center gap-2 text-primary/70">
-                                                        <span className="font-bold text-primary">{formatMoney(markets.reduce((s, m) => s + (m.liquidity || 0), 0))}</span>
+                                                        <span className="font-bold text-primary">{formatMoney(markets.reduce((s, m) => s + (parseFloat(String(m.liquidity)) || 0), 0))}</span>
                                                         <span className="opacity-50 text-[9px] uppercase">LIQ</span>
                                                     </div>
                                                 </div>

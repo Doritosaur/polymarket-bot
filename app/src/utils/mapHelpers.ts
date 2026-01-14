@@ -70,13 +70,17 @@ export const getTooltipHtml = (object: any): string | null => {
     const title = mp.eventSlug || mp.slug || 'Market';
 
     // Calculate aggregate stats
-    const avgYes = markets.reduce((sum: number, m: any) => sum + (m.yesPrice || 0), 0) / marketCount;
-    const avgYesP = (avgYes * 100).toFixed(0);
-    const avgNoP = ((1 - avgYes) * 100).toFixed(0);
-    const isUp = avgYes > 0.5;
+    // Find market with highest volume
+    const topMarket = markets.reduce((prev: any, current: any) =>
+        (parseFloat(prev.volume) || 0) > (parseFloat(current.volume) || 0) ? prev : current
+    );
 
-    const totalVolume = markets.reduce((sum: number, m: any) => sum + (m.volume || 0), 0);
-    const totalLiquidity = markets.reduce((sum: number, m: any) => sum + (m.liquidity || 0), 0);
+    const topYesP = (topMarket.yesPrice * 100).toFixed(0);
+    const topNoP = (topMarket.noPrice * 100).toFixed(0);
+    const isTopUp = topMarket.yesPrice > 0.5;
+
+    const totalVolume = markets.reduce((sum: number, m: any) => sum + (parseFloat(m.volume) || 0), 0);
+    const totalLiquidity = markets.reduce((sum: number, m: any) => sum + (parseFloat(m.liquidity) || 0), 0);
 
     // For single market, show its slug; for multi-market events, show count
     const contentHtml = marketCount > 1
@@ -88,51 +92,56 @@ export const getTooltipHtml = (object: any): string | null => {
                 gap: 8px;
             ">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <span style="font-size: 10px; color: ${TOOLTIP_THEME.yesText}; opacity: 0.6; text-transform: uppercase;">Markets</span>
-                    <span style="font-size: 14px; font-weight: 700; color: ${TOOLTIP_THEME.yesText};">${marketCount}</span>
+                    <span style="font-size: 10px; color: ${TOOLTIP_THEME.textMain}; opacity: 0.6; text-transform: uppercase;">Markets</span>
+                    <span style="font-size: 14px; font-weight: 700; color: ${TOOLTIP_THEME.textMain};">${marketCount}</span>
                 </div>
                 <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <span style="font-size: 10px; color: ${TOOLTIP_THEME.yesText}; opacity: 0.6; text-transform: uppercase;">Volume</span>
-                    <span style="font-size: 14px; font-weight: 700; color: ${TOOLTIP_THEME.yesText};">${formatMoney(totalVolume)}</span>
+                    <span style="font-size: 10px; color: ${TOOLTIP_THEME.textMain}; opacity: 0.6; text-transform: uppercase;">Volume</span>
+                    <span style="font-size: 14px; font-weight: 700; color: ${TOOLTIP_THEME.textMain};">${formatMoney(totalVolume)}</span>
                 </div>
                 <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <span style="font-size: 10px; color: ${TOOLTIP_THEME.yesText}; opacity: 0.6; text-transform: uppercase;">Liquidity</span>
-                    <span style="font-size: 14px; font-weight: 700; color: ${TOOLTIP_THEME.yesText};">${formatMoney(totalLiquidity)}</span>
+                    <span style="font-size: 10px; color: ${TOOLTIP_THEME.textMain}; opacity: 0.6; text-transform: uppercase;">Liquidity</span>
+                    <span style="font-size: 14px; font-weight: 700; color: ${TOOLTIP_THEME.textMain};">${formatMoney(totalLiquidity)}</span>
                 </div>
                 <div style="height: 1px; background: rgba(16, 185, 129, 0.2); margin: 4px 0;"></div>
+                
+                <div style="font-size: 10px; color: ${TOOLTIP_THEME.textMain}; opacity: 0.8; text-transform: uppercase; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                    Top: ${topMarket.slug}
+                </div>
+
                 <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <span style="font-size: 10px; color: ${TOOLTIP_THEME.yesText}; opacity: 0.6; text-transform: uppercase;">Avg YES</span>
-                    <span style="font-size: 14px; font-weight: 700; color: ${isUp ? TOOLTIP_THEME.yesText : TOOLTIP_THEME.noText};">${avgYesP}%</span>
+                    <span style="font-size: 10px; color: ${TOOLTIP_THEME.textMain}; opacity: 0.6; text-transform: uppercase;">YES</span>
+                    <span style="font-size: 14px; font-weight: 700; color: ${isTopUp ? TOOLTIP_THEME.textMain : TOOLTIP_THEME.textAlert};">${topYesP}%</span>
                 </div>
                 <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <span style="font-size: 10px; color: ${TOOLTIP_THEME.yesText}; opacity: 0.6; text-transform: uppercase;">Avg NO</span>
-                    <span style="font-size: 14px; font-weight: 700; color: ${TOOLTIP_THEME.noText};">${avgNoP}%</span>
+                    <span style="font-size: 10px; color: ${TOOLTIP_THEME.textMain}; opacity: 0.6; text-transform: uppercase;">NO</span>
+                    <span style="font-size: 14px; font-weight: 700; color: ${TOOLTIP_THEME.textAlert};">${topNoP}%</span>
                 </div>
             </div>
         `
         : `
             <div style="padding: 12px;">
-                <div style="font-size: 11px; color: ${TOOLTIP_THEME.yesText}; opacity: 0.7; margin-bottom: 8px; line-clamp: 2; overflow: hidden;">
+                <div style="font-size: 11px; color: ${TOOLTIP_THEME.textMain}; opacity: 0.7; margin-bottom: 8px; line-clamp: 2; overflow: hidden;">
                     ${markets[0].slug}
                 </div>
                 <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
                     <div style="display: flex; flex-direction: column;">
-                        <span style="font-size: 9px; color: ${TOOLTIP_THEME.yesText}; opacity: 0.5; text-transform: uppercase;">VOL</span>
-                        <span style="font-size: 12px; font-weight: 700; color: ${TOOLTIP_THEME.yesText};">${formatMoney(totalVolume)}</span>
+                        <span style="font-size: 9px; color: ${TOOLTIP_THEME.textMain}; opacity: 0.5; text-transform: uppercase;">VOL</span>
+                        <span style="font-size: 12px; font-weight: 700; color: ${TOOLTIP_THEME.textMain};">${formatMoney(totalVolume)}</span>
                     </div>
                     <div style="display: flex; flex-direction: column; align-items: flex-end;">
-                        <span style="font-size: 9px; color: ${TOOLTIP_THEME.yesText}; opacity: 0.5; text-transform: uppercase;">LIQ</span>
-                        <span style="font-size: 12px; font-weight: 700; color: ${TOOLTIP_THEME.yesText};">${formatMoney(totalLiquidity)}</span>
+                        <span style="font-size: 9px; color: ${TOOLTIP_THEME.textMain}; opacity: 0.5; text-transform: uppercase;">LIQ</span>
+                        <span style="font-size: 12px; font-weight: 700; color: ${TOOLTIP_THEME.textMain};">${formatMoney(totalLiquidity)}</span>
                     </div>
                 </div>
                 <div style="display: flex; gap: 16px;">
                     <div>
-                        <span style="font-size: 10px; color: ${TOOLTIP_THEME.yesText}; opacity: 0.5; text-transform: uppercase;">YES</span>
-                        <div style="font-size: 14px; font-weight: 700; color: ${isUp ? TOOLTIP_THEME.yesText : TOOLTIP_THEME.textSecondary};">${avgYesP}%</div>
+                        <span style="font-size: 10px; color: ${TOOLTIP_THEME.textMain}; opacity: 0.5; text-transform: uppercase;">YES</span>
+                        <div style="font-size: 14px; font-weight: 700; color: ${isTopUp ? TOOLTIP_THEME.textMain : TOOLTIP_THEME.textDim};">${topYesP}%</div>
                     </div>
                     <div>
-                        <span style="font-size: 10px; color: ${TOOLTIP_THEME.yesText}; opacity: 0.5; text-transform: uppercase;">NO</span>
-                        <div style="font-size: 14px; font-weight: 700; color: ${TOOLTIP_THEME.noText};">${avgNoP}%</div>
+                        <span style="font-size: 10px; color: ${TOOLTIP_THEME.textMain}; opacity: 0.5; text-transform: uppercase;">NO</span>
+                        <div style="font-size: 14px; font-weight: 700; color: ${TOOLTIP_THEME.textAlert};">${topNoP}%</div>
                     </div>
                 </div>
             </div>
@@ -141,7 +150,7 @@ export const getTooltipHtml = (object: any): string | null => {
     return `
         <div style="
             background: ${TOOLTIP_THEME.background};
-            border: 2px solid ${TOOLTIP_THEME.yesText};
+            border: 2px solid ${TOOLTIP_THEME.textMain};
             padding: 0;
             border-radius: 0;
             color: #fff;
@@ -161,7 +170,7 @@ export const getTooltipHtml = (object: any): string | null => {
                 <div style="
                     font-size: 11px;
                     font-weight: 700; 
-                    color: ${TOOLTIP_THEME.yesText};
+                    color: ${TOOLTIP_THEME.textMain};
                     text-transform: uppercase;
                     letter-spacing: 0.05em;
                     flex: 1;
@@ -174,8 +183,8 @@ export const getTooltipHtml = (object: any): string | null => {
                 ${marketCount > 1 ? `
                     <div style="
                         font-size: 10px;
-                        color: ${TOOLTIP_THEME.yesText};
-                        border: 1px solid ${TOOLTIP_THEME.yesText};
+                        color: ${TOOLTIP_THEME.textMain};
+                        border: 1px solid ${TOOLTIP_THEME.textMain};
                         padding: 2px 6px;
                     ">
                         ${marketCount} MKTS
@@ -191,15 +200,15 @@ export const getTooltipHtml = (object: any): string | null => {
                 padding: 8px 12px;
                 border-top: 1px solid rgba(16, 185, 129, 0.2);
                 font-size: 10px; 
-                color: ${TOOLTIP_THEME.textSecondary}; 
+                color: ${TOOLTIP_THEME.textDim}; 
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
             ">
-                <span style="${mp.isPinned ? `color: ${TOOLTIP_THEME.pinned};` : ''}">
+                <span style="${mp.isPinned ? `color: ${TOOLTIP_THEME.pinColor};` : ''}">
                     ${mp.isPinned ? '★ PINNED' : ''}
                 </span>
-                <span style="color: ${TOOLTIP_THEME.yesText}; opacity: 0.8;">
+                <span style="color: ${TOOLTIP_THEME.textMain}; opacity: 0.8;">
                     [ CLICK FOR DETAILS ]
                 </span>
             </div>

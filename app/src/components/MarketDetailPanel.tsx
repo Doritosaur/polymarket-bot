@@ -6,6 +6,7 @@ import {
     SheetContent,
     SheetHeader,
     SheetTitle,
+    SheetDescription,
 } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -63,6 +64,9 @@ export function MarketDetailPanel({ open, onClose, eventData }: MarketDetailPane
                         <SheetTitle className="text-primary text-sm font-bold uppercase tracking-wider">
                             Event_Details //
                         </SheetTitle>
+                        <SheetDescription className="sr-only">
+                            Details for event {eventSlug}
+                        </SheetDescription>
                         <div className="flex items-center gap-2">
                             {isEventPinned ? (
                                 <Button

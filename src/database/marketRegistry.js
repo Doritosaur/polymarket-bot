@@ -47,7 +47,7 @@ class MarketRegistry {
         try {
             await client.query('BEGIN');
 
-            // 1. MARKETS (Removed clob_token_ids, yes_price, no_price)
+            // 1. MARKETS
             await client.query(`
                 CREATE TABLE IF NOT EXISTS markets (
                     id SERIAL PRIMARY KEY,
@@ -55,31 +55,32 @@ class MarketRegistry {
                     slug TEXT,
                     event_slug TEXT,
                     description TEXT,
-                    threshold REAL,
+                    threshold NUMERIC(10, 2),
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    active INTEGER DEFAULT 1,
-                    watched INTEGER DEFAULT 0,
+                    active BOOLEAN DEFAULT TRUE,
+                    watched BOOLEAN DEFAULT FALSE,
                     end_date TEXT,
                     image TEXT,
                     group_date TEXT,
                     tags TEXT[],
-                    volume REAL DEFAULT 0,
-                    liquidity REAL DEFAULT 0
+                    volume NUMERIC(18, 4) DEFAULT 0,
+                    liquidity NUMERIC(18, 4) DEFAULT 0
                 );
             `);
 
-            // 2. MARKET_TOKENS (New, Normalized)
+            // 2. MARKET_TOKENS (Normalized)
             await client.query(`
                 CREATE TABLE IF NOT EXISTS market_tokens (
                     id SERIAL PRIMARY KEY,
                     condition_id VARCHAR(255) REFERENCES markets(condition_id) ON DELETE CASCADE,
                     token_id VARCHAR(255) NOT NULL UNIQUE,
-                    outcome VARCHAR(50), -- YES, NO
-                    price REAL, -- Last known price (for cold start), NOT for realtime
-                    liquidity REAL,
+                    outcome VARCHAR(50),
+                    price NUMERIC(10, 6),
+                    liquidity NUMERIC(18, 4),
                     active BOOLEAN DEFAULT TRUE,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
             `);
 
@@ -164,12 +165,14 @@ class MarketRegistry {
                 CREATE INDEX IF NOT EXISTS idx_markets_created_at ON markets(created_at);
                 CREATE INDEX IF NOT EXISTS idx_markets_active ON markets(active);
                 CREATE INDEX IF NOT EXISTS idx_markets_watched ON markets(watched);
+                CREATE INDEX IF NOT EXISTS idx_markets_tags_gin ON markets USING GIN (tags);
                 CREATE INDEX IF NOT EXISTS idx_market_tokens_token_id ON market_tokens(token_id);
                 CREATE INDEX IF NOT EXISTS idx_market_tokens_condition_id ON market_tokens(condition_id);
                 CREATE INDEX IF NOT EXISTS idx_subscriptions_composite ON subscriptions(guild_id, channel_id);
                 CREATE INDEX IF NOT EXISTS idx_subscriptions_target ON subscriptions(target_type, target_id);
                 CREATE INDEX IF NOT EXISTS idx_user_pins_user_id ON user_pins(user_id);
                 CREATE INDEX IF NOT EXISTS idx_tags_slug ON tags(slug);
+                CREATE INDEX IF NOT EXISTS idx_system_events_payload ON system_events USING GIN (payload);
             `);
 
             await client.query('COMMIT');
@@ -283,7 +286,7 @@ class MarketRegistry {
             await client.query('BEGIN');
 
             if (options.fullSync) {
-                await client.query('UPDATE markets SET active = 0 WHERE active = 1');
+                await client.query('UPDATE markets SET active = FALSE WHERE active = TRUE');
             }
 
             const marketsBatch = [];
@@ -310,7 +313,7 @@ class MarketRegistry {
                     tags: tags,
                     volume: market.volume || 0,
                     liquidity: market.liquidity || 0,
-                    watched_val: options.setWatched ? 1 : 0 // Default for access in query
+                    watched_val: options.setWatched ? true : false // Default for access in query
                 });
 
                 activeConditionIds.push(normalizedConditionId);
@@ -351,12 +354,12 @@ class MarketRegistry {
                     INSERT INTO markets (condition_id, slug, description, event_slug, threshold, end_date, image, group_date, tags, volume, liquidity, active, watched, updated_at)
                     SELECT 
                         condition_id, slug, description, event_slug, threshold, end_date, image, group_date, tags, volume, liquidity, 
-                        1 as active, 
+                        TRUE as active, 
                         watched_val as watched, 
                         CURRENT_TIMESTAMP
                     FROM jsonb_to_recordset($1::jsonb) AS x(
                         condition_id text, slug text, description text, event_slug text, threshold real, 
-                        end_date text, image text, group_date text, tags text[], volume real, liquidity real, watched_val int
+                        end_date text, image text, group_date text, tags text[], volume real, liquidity real, watched_val boolean
                     )
                     ON CONFLICT(condition_id) DO UPDATE SET
                         slug = COALESCE(EXCLUDED.slug, markets.slug),
@@ -369,7 +372,7 @@ class MarketRegistry {
                         tags = COALESCE(EXCLUDED.tags, markets.tags),
                         volume = EXCLUDED.volume,
                         liquidity = EXCLUDED.liquidity,
-                        active = 1,
+                        active = TRUE,
                         watched = CASE WHEN $2 = true THEN EXCLUDED.watched ELSE markets.watched END,
                         updated_at = CURRENT_TIMESTAMP
                 `, [JSON.stringify(marketsBatch), options.setWatched]);
@@ -417,7 +420,7 @@ class MarketRegistry {
         try {
             const res = await this.pool.query(`
                 UPDATE markets 
-                SET active = 0, watched = 0, updated_at = CURRENT_TIMESTAMP
+                SET active = FALSE, watched = FALSE, updated_at = CURRENT_TIMESTAMP
                 WHERE condition_id = $1
             `, [normalizedConditionId]);
 
@@ -439,7 +442,7 @@ class MarketRegistry {
     async setMarketWatched(conditionId, watched) {
         this.marketsCache = null; // Invalidate cache
         const normalizedConditionId = this.normalizeConditionId(conditionId);
-        const val = watched ? 1 : 0;
+        const val = watched ? true : false;
         const res = await this.pool.query(`
             UPDATE markets SET watched = $1, updated_at = CURRENT_TIMESTAMP WHERE condition_id = $2
         `, [val, normalizedConditionId]);
@@ -460,7 +463,7 @@ class MarketRegistry {
     async setEventThreshold(eventSlug, amount) {
         this.marketsCache = null; // Invalidate cache
         const res = await this.pool.query(`
-            UPDATE markets SET threshold = $1, updated_at = CURRENT_TIMESTAMP WHERE event_slug = $2 AND active = 1
+            UPDATE markets SET threshold = $1, updated_at = CURRENT_TIMESTAMP WHERE event_slug = $2 AND active = TRUE
         `, [amount, eventSlug]);
         return res.rowCount;
     }
@@ -484,8 +487,8 @@ class MarketRegistry {
             // WHERE active = 1 AND condition_id NOT IN (...)
             const res = await client.query(`
                 UPDATE markets 
-                SET active = 0, watched = 0, updated_at = CURRENT_TIMESTAMP
-                WHERE active = 1 AND condition_id != ALL($1)
+                SET active = FALSE, watched = FALSE, updated_at = CURRENT_TIMESTAMP
+                WHERE active = TRUE AND condition_id != ALL($1)
             `, [normalizedIds]);
 
             // 3. Deactivate tokens
@@ -494,7 +497,7 @@ class MarketRegistry {
                     UPDATE market_tokens 
                     SET active = FALSE 
                     WHERE condition_id IN (
-                        SELECT condition_id FROM markets WHERE active = 0 AND updated_at = CURRENT_TIMESTAMP
+                        SELECT condition_id FROM markets WHERE active = FALSE AND updated_at = CURRENT_TIMESTAMP
                     )
                 `);
             }
@@ -596,7 +599,7 @@ class MarketRegistry {
                    MAX(CASE WHEN t.outcome = 'NO' THEN t.token_id END) as no_asset_id
             FROM markets m
             LEFT JOIN market_tokens t ON m.condition_id = t.condition_id
-            WHERE m.active = 1
+            WHERE m.active = TRUE
             GROUP BY m.id
             ORDER BY m.created_at DESC
         `);
