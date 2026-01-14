@@ -63,6 +63,8 @@ async function fetchAllActiveMarkets(onBatch) {
                             image: market.image || event.image,
                             groupDate: market.groupItemTitle,
                             tags: eventTags, // Add tags from event
+                            volume: market.volume,
+                            liquidity: market.liquidity,
                             active: true
                         });
 

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useMarketStore, type DisplayMarket } from "../store/marketStore";
-import { Pin, TrendingUp, TrendingDown } from "lucide-react";
+import { Pin } from "lucide-react";
+import { formatMoney } from "@/utils/mapHelpers";
 import { MarketDetailPanel } from './MarketDetailPanel';
 
 export function PinnedFeed() {
@@ -58,8 +59,6 @@ export function PinnedFeed() {
                         <div className="flex flex-col">
                             {Array.from(eventGroups.entries()).map(([eventKey, markets]) => {
                                 const primaryMarket = markets[0];
-                                const avgYes = markets.reduce((sum, m) => sum + m.yesPrice, 0) / markets.length;
-                                const isUp = avgYes > 0.5;
 
                                 return (
                                     <button
@@ -82,16 +81,15 @@ export function PinnedFeed() {
                                                     {primaryMarket.eventSlug || primaryMarket.slug}
                                                 </div>
                                                 <div className="flex items-center gap-2 mt-1 text-[10px]">
-                                                    <span className="text-primary/50">{markets.length} MKT{markets.length > 1 ? 'S' : ''}</span>
+                                                    <div className="flex items-center gap-2 text-primary/70">
+                                                        <span className="font-bold text-primary">{formatMoney(markets.reduce((s, m) => s + (m.volume || 0), 0))}</span>
+                                                        <span className="opacity-50 text-[9px] uppercase">VOL</span>
+                                                    </div>
                                                     <span className="text-primary/30">|</span>
-                                                    <span className={isUp ? 'text-primary' : 'text-destructive'}>
-                                                        AVG: {(avgYes * 100).toFixed(0)}%
-                                                    </span>
-                                                    {isUp ? (
-                                                        <TrendingUp className="w-3 h-3 text-primary" />
-                                                    ) : (
-                                                        <TrendingDown className="w-3 h-3 text-destructive" />
-                                                    )}
+                                                    <div className="flex items-center gap-2 text-primary/70">
+                                                        <span className="font-bold text-primary">{formatMoney(markets.reduce((s, m) => s + (m.liquidity || 0), 0))}</span>
+                                                        <span className="opacity-50 text-[9px] uppercase">LIQ</span>
+                                                    </div>
                                                 </div>
                                             </div>
                                         </div>

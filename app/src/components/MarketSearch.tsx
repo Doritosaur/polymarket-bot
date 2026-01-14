@@ -32,7 +32,6 @@ export function MarketSearch({ onSelectMarket }: MarketSearchProps) {
         const markets = Array.from(marketMap.values());
         return new Fuse(markets, {
             keys: [
-                { name: 'question', weight: 0.5 },
                 { name: 'slug', weight: 0.3 },
                 { name: 'eventSlug', weight: 0.2 }
             ],
@@ -43,17 +42,35 @@ export function MarketSearch({ onSelectMarket }: MarketSearchProps) {
         });
     }, [marketMap]);
 
-    // Fuzzy search results
+    // Fuzzy search results with Event Aggregation
     const results = useMemo(() => {
         if (!query.trim() || query.length < 2) return [];
 
         const searchResults = fuse.search(query);
-        return searchResults.slice(0, 8).map(r => r.item); // Limit to 8 results
+        const aggregated = new Map<string, any[]>();
+
+        // Group matches by Event Slug
+        searchResults.forEach(r => {
+            const m = r.item as any;
+            const key = m.eventSlug || m.slug;
+            if (!aggregated.has(key)) aggregated.set(key, []);
+            aggregated.get(key)!.push(m);
+        });
+
+        // Convert back to array, select representative market, and limit
+        return Array.from(aggregated.entries())
+            .map(([key, markets]) => ({
+                representative: markets[0],
+                count: markets.length,
+                key
+            }))
+            .slice(0, 8);
     }, [query, fuse]);
 
-    const handleSelect = (market: any) => {
-        const coords = getMarketCoordinates(market.question + ' ' + market.slug, market.tags);
-        onSelectMarket(coords.lng, coords.lat, 5); // Zoom level 5 for focus
+    const handleSelect = (item: { representative: any }) => {
+        const market = item.representative;
+        const coords = getMarketCoordinates(market.slug, market.tags);
+        onSelectMarket(coords.lng, coords.lat, 20); // Zoom level 5 for focus
         setQuery('');
         setIsOpen(false);
     };
@@ -72,7 +89,7 @@ export function MarketSearch({ onSelectMarket }: MarketSearchProps) {
                         setIsOpen(true);
                     }}
                     onFocus={() => setIsOpen(true)}
-                    placeholder="Search markets..."
+                    placeholder="Search events..."
                     className="h-7 w-52 pl-9 pr-8 bg-black border-2 border-primary/50 hover:border-primary focus-visible:border-primary text-primary placeholder:text-primary/30 font-mono"
                 />
                 {query && (
@@ -91,17 +108,21 @@ export function MarketSearch({ onSelectMarket }: MarketSearchProps) {
             {/* Results Dropdown */}
             {isOpen && results.length > 0 && (
                 <div className="absolute top-full left-0 right-0 mt-1 bg-black border-2 border-primary max-h-64 overflow-y-auto z-50 font-mono">
-                    {results.map((market) => (
+                    {results.map((item) => (
                         <button
-                            key={market.conditionId}
-                            onClick={() => handleSelect(market)}
+                            key={item.key}
+                            onClick={() => handleSelect(item)}
                             className="w-full text-left px-3 py-2 hover:bg-primary/10 border-b border-primary/20 last:border-b-0 transition-colors"
                         >
-                            <div className="text-xs text-primary/80 line-clamp-1">
-                                {market.question}
-                            </div>
-                            <div className="text-[10px] text-primary/40 mt-0.5">
-                                {market.slug}
+                            <div className="flex items-center justify-between">
+                                <div className="text-xs text-primary/90 truncate pr-2">
+                                    {item.representative.eventSlug || item.representative.slug}
+                                </div>
+                                {item.count > 1 && (
+                                    <div className="text-[10px] text-primary/50 border border-primary/30 px-1 rounded bg-primary/5 shrink-0">
+                                        {item.count} MKTS
+                                    </div>
+                                )}
                             </div>
                         </button>
                     ))}

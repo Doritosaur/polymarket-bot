@@ -1,11 +1,11 @@
-import { useMemo, useState, useEffect, useCallback } from 'react';
+import { useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import DeckGL from '@deck.gl/react';
 import { GeoJsonLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers';
 import { HeatmapLayer } from '@deck.gl/aggregation-layers';
 import { FlyToInterpolator } from '@deck.gl/core';
 import { useMarketStore } from "../store/marketStore";
 import { getMarketCoordinates } from "../utils/GeoMapper";
-import Supercluster from 'supercluster';
+import ClusterWorker from '../workers/cluster.worker?worker';
 import { TagFilter } from './TagFilter';
 import { MarketSearch } from './MarketSearch';
 import { ZoneFilter } from './ZoneFilter';
@@ -17,7 +17,7 @@ import { getGlowData, getTooltipHtml } from '../utils/mapHelpers';
 const GEO_JSON_URL = "/world-map.geojson";
 
 export function MapController() {
-    const { marketMap, pinnedIds, selectedTags } = useMarketStore();
+    const { marketMap, pinnedIds, selectedTags, structureVersion } = useMarketStore();
 
     // State for detail panel
     const [selectedEvent, setSelectedEvent] = useState<any>(null);
@@ -50,114 +50,129 @@ export function MapController() {
         }));
     }, []);
 
-    // 1. Prepare Base Layout - Only re-calc when market list changes
-    const layoutFeatures = useMemo(() => {
-        const features: any[] = [];
-        const locationGroups = new Map<string, any[]>();
+    // 1. Worker Setup & State
+    const [clusters, setClusters] = useState<any[]>([]);
+    const [layoutFeatures, setLayoutFeatures] = useState<any[]>([]);
+    const workerRef = useRef<Worker | null>(null);
+    const pendingFlyTo = useRef<[number, number] | null>(null);
+    const [lastFrameTime, setLastFrameTime] = useState(0);
+
+    useEffect(() => {
+        workerRef.current = new ClusterWorker();
+
+        // Handle Worker Messages
+        workerRef.current.onmessage = (e: MessageEvent) => {
+            const { type, payload } = e.data;
+            if (type === 'MARKETS_UPDATED') {
+                // Store points for Glows/Heatmap
+                setLayoutFeatures(payload.points);
+
+                // Index ready, request clusters for current view
+                workerRef.current?.postMessage({
+                    id: Date.now(),
+                    type: 'GET_CLUSTERS',
+                    payload: {
+                        zoom: viewState.zoom,
+                        bbox: [-180, -90, 180, 90]
+                    }
+                });
+            } else if (type === 'CLUSTER_RESULT') {
+                setClusters(payload.clusters);
+            } else if (type === 'EXPANSION_ZOOM_RESULT') {
+                if (pendingFlyTo.current) {
+                    flyTo(pendingFlyTo.current[0], pendingFlyTo.current[1], payload.zoom);
+                    pendingFlyTo.current = null;
+                }
+            }
+        };
+
+        return () => {
+            workerRef.current?.terminate();
+        };
+    }, []);
+
+    // 2. Prepare Data & Send to Worker (Async Layout)
+    useEffect(() => {
+        if (!workerRef.current) return;
 
         // Group by Event Slug (or Condition ID if no slug)
         const events = new Map<string, any[]>();
 
         marketMap.forEach(m => {
-            // Filter by tags if any are selected
             if (selectedTags.size > 0) {
                 const hasTag = m.tags?.some(tag => selectedTags.has(tag));
                 if (!hasTag) return;
             }
-
-            // Group Key: Use eventSlug if available, otherwise fallback to conditionId (single market)
             const key = m.eventSlug || m.conditionId;
             if (!events.has(key)) events.set(key, []);
             events.get(key)!.push(m);
         });
 
+        // Prepare simplified list of "Display Items" (Events or Single Markets)
+        const simplifiedMarkets: any[] = [];
+
         events.forEach(group => {
-            // Use the first market in the group for coordinates
-            const m = group[0];
-
-            // Pass tags for faster O(1) lookup, fall back to text search
+            const m = group[0]; // Representative
             const base = getMarketCoordinates(m.question + " " + m.slug, m.tags);
-            const key = `${base.lat},${base.lng}`;
+            const isEvent = group.length > 1;
 
-            if (!locationGroups.has(key)) locationGroups.set(key, []);
-
-            // Store the whole group
-            locationGroups.get(key)!.push({
-                ...m,
+            simplifiedMarkets.push({
+                conditionId: m.conditionId,
                 baseCoords: base,
-                isEvent: group.length > 1,
-                marketCount: group.length,
-                groupMarkets: group
+                isEvent: isEvent,
+                groupMarkets: isEvent ? group.map(gm => ({ conditionId: gm.conditionId })) : undefined
             });
         });
 
-        locationGroups.forEach((marketsAtLoc) => {
-            const count = marketsAtLoc.length;
-            marketsAtLoc.forEach((m, index) => {
-                let finalLng = m.baseCoords.lng;
-                let finalLat = m.baseCoords.lat;
-
-                if (count > 1) {
-                    const angle = index * 0.5;
-                    const radius = 0.1 + (0.0005 * index);
-                    const latOffset = radius * Math.sin(angle);
-                    const lngOffset = (radius * Math.cos(angle)) / Math.cos(m.baseCoords.lat * (Math.PI / 180));
-                    finalLng += lngOffset;
-                    finalLat += latOffset;
-                }
-
-                features.push({
-                    conditionId: m.conditionId,
-                    geometry: { type: 'Point', coordinates: [finalLng, finalLat] }
-                });
-            });
+        workerRef.current.postMessage({
+            id: Date.now(),
+            type: 'UPDATE_MARKETS',
+            payload: { markets: simplifiedMarkets }
         });
-        return features;
-    }, [marketMap.size, selectedTags]);
 
-    // 2. Merge with Dynamic Data
-    const points = useMemo(() => {
-        return layoutFeatures.map(lf => {
-            const m = marketMap.get(lf.conditionId);
-            if (!m) return null;
+    }, [structureVersion, selectedTags]);
 
-            const isPinned = pinnedIds.has(m.conditionId);
-            const isUp = m.yesPrice > 0.5;
-
-            return {
-                type: 'Feature',
-                properties: {
-                    cluster: false,
-                    ...m,
-                    isPinned,
-                    color: isUp ? MAP_COLORS.bullish : MAP_COLORS.bearish,
-                    strokeColor: isPinned ? MAP_COLORS.cyberGreen : [255, 255, 255, 50],
-                    // Pass event properties
-                    isEvent: lf.isEvent,
-                    marketCount: lf.marketCount,
-                },
-                geometry: lf.geometry
-            };
-        }).filter(Boolean) as any[];
-    }, [layoutFeatures, marketMap, pinnedIds]);
-
-    // 3. Initialize Supercluster
-    const index = useMemo(() => {
-        const sc = new Supercluster({ radius: 80, maxZoom: 6 });
-        sc.load(points);
-        return sc;
-    }, [points]);
-
-    // 4. Get Clusters based on ViewState
-    const [clusters, setClusters] = useState<any[]>([]);
-    const [lastFrameTime, setLastFrameTime] = useState(0); // Trigger re-render for animation
+    // 3. Update View (Zoom) - Throttled
+    const lastZoomRequestRef = useRef(0);
+    const zoomTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     useEffect(() => {
-        const bbox: [number, number, number, number] = [-180, -90, 180, 90];
-        setClusters(index.getClusters(bbox, Math.floor(viewState.zoom)));
-    }, [viewState.zoom, index]);
+        if (!workerRef.current) return;
 
-    // 5. Static heatmap data - Back to static for subtle look
+        const now = Date.now();
+        const throttleMs = 64; // ~15fps is smooth enough for clusters during zoom
+
+        const doUpdate = () => {
+            workerRef.current?.postMessage({
+                id: Date.now(),
+                type: 'GET_CLUSTERS',
+                payload: {
+                    zoom: viewState.zoom,
+                    bbox: [-180, -90, 180, 90]
+                }
+            });
+            lastZoomRequestRef.current = Date.now();
+        };
+
+        if (now - lastZoomRequestRef.current > throttleMs) {
+            if (zoomTimeoutRef.current) clearTimeout(zoomTimeoutRef.current);
+            doUpdate();
+        } else {
+            if (zoomTimeoutRef.current) clearTimeout(zoomTimeoutRef.current);
+            zoomTimeoutRef.current = setTimeout(doUpdate, throttleMs);
+        }
+
+        return () => {
+            if (zoomTimeoutRef.current) clearTimeout(zoomTimeoutRef.current);
+        };
+    }, [viewState.zoom]);
+
+
+
+
+    // 5. (Removed renderClusters to prevent allocation loop)
+
+    // 6. Static heatmap data
     const heatmapData = useMemo(() => {
         return layoutFeatures.map(lf => ({
             position: lf.geometry.coordinates as [number, number],
@@ -165,30 +180,23 @@ export function MapController() {
         }));
     }, [layoutFeatures]);
 
-
-
-    // 7. Glow Data for subtle feedback
+    // 7. Glow Data
     const glowData = useMemo(() => {
         return getGlowData(marketMap, layoutFeatures, Date.now());
-    }, [layoutFeatures, marketMap, lastFrameTime]); // This will update when addTrade updates marketMap or frame updates
+    }, [layoutFeatures, marketMap, lastFrameTime]);
 
-
-    // ANIMATION LOOP: Syncs with Active Glows
+    // Animation Loop
     useEffect(() => {
         let animationFrameId: number;
-
         const loop = () => {
             setLastFrameTime(Date.now());
             animationFrameId = requestAnimationFrame(loop);
         };
-
         if (glowData.length > 0) {
             animationFrameId = requestAnimationFrame(loop);
         }
-
         return () => cancelAnimationFrame(animationFrameId);
     }, [glowData.length]);
-
 
     // Layers - optimized for performance
     const layers = useMemo(() => [
@@ -216,33 +224,27 @@ export function MapController() {
             colorRange: MAP_COLORS.heatmapRange,
         }),
 
-
-
         // Glow Layer (Subtle Backlight)
         new ScatterplotLayer({
             id: 'market-glows',
+            // ... (keep logic)
             data: glowData,
             getPosition: (d: any) => d.position,
             filled: true,
-            getFillColor: [...MAP_COLORS.cyberGreen, 255],
+            getFillColor: [...MAP_COLORS.cyberYellow, 255],
             stroked: false,
             radiusUnits: 'pixels',
             getRadius: (d: any) => {
                 const age = Date.now() - d.timestamp;
-                const progress = age / 5000; // 0 to 1 over 5s
-                // Breathing radius
-                return 15 + (Math.sin(progress * Math.PI * 8) * 5); // 15px +/- 5px
+                const progress = age / 5000;
+                return 15 + (Math.sin(progress * Math.PI * 8) * 5);
             },
             getOpacity: (d: any) => {
                 const age = Date.now() - d.timestamp;
                 const progress = age / 5000;
-                // Blinking Fading Opacity
-                // Base fade: 1 -> 0
                 const fade = Math.max(0, 1 - progress);
-                // Blink: 0 -> 1 -> 0 ... (8 times)
                 const blink = 0.4 + 0.6 * Math.abs(Math.sin(progress * Math.PI * 8));
-
-                return fade * blink * 0.8; // Max 0.8 opacity
+                return fade * blink * 0.8;
             },
             updateTriggers: {
                 getRadius: Date.now(),
@@ -260,15 +262,19 @@ export function MapController() {
             data: clusters.filter(f => f.properties.cluster),
             getPosition: (d: any) => d.geometry.coordinates,
             getFillColor: MAP_COLORS.clusterFill,
-            getLineColor: MAP_COLORS.cyberGreen,
+            getLineColor: MAP_COLORS.cyberYellow,
             getLineWidth: 2,
             getRadius: 12,
             radiusScale: 1,
             radiusUnits: 'pixels',
             pickable: true,
             onClick: ({ object }: any) => {
-                const expansionZoom = index.getClusterExpansionZoom(object.properties.cluster_id);
-                flyTo(object.geometry.coordinates[0], object.geometry.coordinates[1], expansionZoom);
+                pendingFlyTo.current = object.geometry.coordinates as [number, number];
+                workerRef.current?.postMessage({
+                    id: Date.now(),
+                    type: 'GET_EXPANSION_ZOOM',
+                    payload: { clusterId: object.properties.cluster_id }
+                });
             }
         }),
 
@@ -277,32 +283,74 @@ export function MapController() {
             id: 'cluster-counts',
             data: clusters.filter(f => f.properties.cluster),
             getPosition: (d: any) => d.geometry.coordinates,
-            getText: (d: any) => `${d.properties.point_count_abbreviated}`,
+            getText: (d: any) => `${d.properties.point_count_abbreviated || d.properties.point_count}`,
             getSize: 10,
             getColor: MAP_COLORS.clusterText,
             fontFamily: 'JetBrains Mono'
         }),
 
-        // Market Dots
+        // Market Dots - DIRECT ACCESS OPTIMIZED
         new ScatterplotLayer({
             id: 'market-dots',
-            data: clusters.filter(f => !f.properties.cluster),
+            data: clusters.filter(f => !f.properties.cluster), // Raw clusters data (stale properties)
             getPosition: (d: any) => d.geometry.coordinates,
-            getFillColor: (d: any) => d.properties.color,
-            getLineColor: (d: any) => d.properties.strokeColor,
-            getLineWidth: (d: any) => d.properties.isPinned ? 3 : 1,
+
+            // Dynamic Colors via Lookup
+            getFillColor: (d: any) => {
+                const m = marketMap.get(d.properties.conditionId) || d.properties;
+                const prob = m.yesPrice;
+                const isYes = prob > 0.5;
+                const alpha = 200 + Math.floor(Math.abs(prob - 0.5) * 2 * 55);
+
+                if (pinnedIds.has(m.conditionId)) return MAP_COLORS.pinned;
+                return isYes ? [...MAP_COLORS.bullish, alpha] : [...MAP_COLORS.bearish, alpha];
+            },
+            getLineColor: (d: any) => {
+                const m = marketMap.get(d.properties.conditionId) || d.properties;
+                const isYes = m.yesPrice > 0.5;
+                return isYes ? MAP_COLORS.bullish : MAP_COLORS.bearish;
+            },
+
+            getLineWidth: (d: any) => pinnedIds.has(d.properties.conditionId) ? 3 : 1,
             lineWidthUnits: 'pixels',
-            getRadius: (d: any) => d.properties.isEvent ? 8 : 6, // Larger for events
+
+            // Check 'isEvent' from d.properties (populated by worker)
+            // Note: worker properties are effectively static until update. 
+            getRadius: (d: any) => d.properties.isEvent ? 8 : 6,
             radiusUnits: 'pixels',
+
             stroked: true,
             pickable: true,
             onClick: (info: any) => {
-                if (info.object) handleMarketClick(info.object.properties);
+                // Use fresh data for selection
+                if (info.object) {
+                    const props = info.object.properties;
+                    const m = marketMap.get(props.conditionId);
+
+                    if (m) {
+                        // Hydrate Group Markets
+                        const groupMarkets = props.groupMarkets
+                            ? props.groupMarkets.map((gm: any) => marketMap.get(gm.conditionId)).filter(Boolean)
+                            : undefined;
+
+                        handleMarketClick({
+                            ...m,
+                            groupMarkets: groupMarkets || (props.isEvent ? [m] : undefined)
+                        });
+                    }
+                }
             },
             autoHighlight: true,
-            highlightColor: [255, 255, 255, 100]
+            highlightColor: [255, 255, 255, 100],
+
+            // IMPORTANT: Trigger update when marketMap changes
+            updateTriggers: {
+                getFillColor: [marketMap, pinnedIds],
+                getLineColor: [marketMap],
+                getLineWidth: [pinnedIds]
+            }
         })
-    ], [clusters, index, flyTo, glowData, heatmapData]);
+    ], [clusters, flyTo, glowData, heatmapData, marketMap, pinnedIds]); // Add marketMap/pinnedIds to dependency
 
     return (
         <div className="w-full h-full bg-neutral-950 relative overflow-hidden">
@@ -312,7 +360,17 @@ export function MapController() {
                 controller={true}
                 layers={layers}
                 getTooltip={({ object }: any) => {
-                    const html = getTooltipHtml(object);
+                    let data = object;
+                    if (object && !object.properties.cluster && object.properties.conditionId) {
+                        const m = marketMap.get(object.properties.conditionId);
+                        if (m) {
+                            data = {
+                                ...object,
+                                properties: { ...object.properties, ...m }
+                            };
+                        }
+                    }
+                    const html = getTooltipHtml(data);
                     return html ? {
                         html,
                         style: {

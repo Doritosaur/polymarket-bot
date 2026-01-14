@@ -8,13 +8,14 @@ export const SOCKET_URL = '/'; // Relative namespace for Socket.IO
 // Cyber Theme Map Colors
 export const MAP_COLORS = {
     // Cyber Theme Map Colors
-    cyberGreen: [0, 255, 159] as [number, number, number],
+    cyberYellow: [255, 232, 29] as [number, number, number], // Yellow Glow
     bullish: [0, 255, 159] as [number, number, number], // Matches --primary/--accent-foreground
     bearish: [197, 0, 60] as [number, number, number], // Matches --destructive (#c5003c)
     bgDark: [10, 10, 10] as [number, number, number],
     borderDark: [40, 40, 40] as [number, number, number],
     clusterFill: [30, 30, 30] as [number, number, number],
     clusterText: [255, 255, 255] as [number, number, number],
+    pinned: [220, 0, 255] as [number, number, number], // Magenta for pinned items
 
     // Heatmap Gradient (low to high intensity)
     heatmapRange: [
@@ -47,4 +48,5 @@ export const TOOLTIP_THEME = {
     noBg: 'rgba(197, 0, 60, 0.1)', // Subtle destructive red bg
     noBorder: '#c5003c',
     noText: '#c5003c',
+    pinned: '#dc00ff', // Magenta
 };

@@ -119,7 +119,9 @@ function App() {
                         yesPrice: m.yes_price || 0.5,
                         noPrice: m.no_price || 0.5,
                         history: [],
-                        tags: m.tags || [] // Category tags from API
+                        tags: m.tags || [], // Category tags from API
+                        volume: m.volume || 0,
+                        liquidity: m.liquidity || 0
                     }));
                     setSnapshot(mappedMarkets);
                 }

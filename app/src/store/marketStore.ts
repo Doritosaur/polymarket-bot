@@ -35,6 +35,8 @@ export interface DisplayMarket {
 
     history: MarketHistory[];
     tags?: string[]; // Category tags from Polymarket API
+    volume: number;
+    liquidity: number;
 }
 
 interface MarketState {
@@ -63,6 +65,7 @@ interface MarketState {
 
     assetIdMap: Map<string, string>; // assetId -> conditionId
     isInitialized: boolean;
+    structureVersion: number;
 }
 
 export const useMarketStore = create<MarketState>((set) => ({
@@ -78,6 +81,7 @@ export const useMarketStore = create<MarketState>((set) => ({
 
     assetIdMap: new Map<string, string>(),
     isInitialized: false,
+    structureVersion: 0,
 
     setSnapshot: (markets) => set((state) => {
         const newMap = new Map(state.marketMap);
@@ -109,7 +113,8 @@ export const useMarketStore = create<MarketState>((set) => ({
         return {
             marketMap: newMap,
             assetIdMap: newAssetIdMap,
-            isInitialized: true
+            isInitialized: true,
+            structureVersion: state.structureVersion + 1
         };
     }),
 
@@ -133,6 +138,7 @@ export const useMarketStore = create<MarketState>((set) => ({
                 newMarket = {
                     ...market,
                     yesPrice: price,
+                    lastTradeTime: timestamp,
                     history: [...market.history, { time: timestamp, price }]
                 };
                 if (newMarket.history.length > 50) newMarket.history.shift();
@@ -141,7 +147,11 @@ export const useMarketStore = create<MarketState>((set) => ({
         } else if (market.noAssetId === assetId) {
             if (market.noPrice !== price) {
                 direction = price > market.noPrice ? 'up' : 'down';
-                newMarket = { ...market, noPrice: price };
+                newMarket = {
+                    ...market,
+                    noPrice: price,
+                    lastTradeTime: timestamp
+                };
                 updated = true;
             }
         }

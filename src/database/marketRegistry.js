@@ -63,7 +63,9 @@ class MarketRegistry {
                     end_date TEXT,
                     image TEXT,
                     group_date TEXT,
-                    tags TEXT[]
+                    tags TEXT[],
+                    volume REAL DEFAULT 0,
+                    liquidity REAL DEFAULT 0
                 );
             `);
 
@@ -163,7 +165,9 @@ class MarketRegistry {
                 CREATE INDEX IF NOT EXISTS idx_markets_active ON markets(active);
                 CREATE INDEX IF NOT EXISTS idx_markets_watched ON markets(watched);
                 CREATE INDEX IF NOT EXISTS idx_market_tokens_token_id ON market_tokens(token_id);
+                CREATE INDEX IF NOT EXISTS idx_market_tokens_condition_id ON market_tokens(condition_id);
                 CREATE INDEX IF NOT EXISTS idx_subscriptions_composite ON subscriptions(guild_id, channel_id);
+                CREATE INDEX IF NOT EXISTS idx_subscriptions_target ON subscriptions(target_type, target_id);
                 CREATE INDEX IF NOT EXISTS idx_user_pins_user_id ON user_pins(user_id);
                 CREATE INDEX IF NOT EXISTS idx_tags_slug ON tags(slug);
             `);
@@ -273,7 +277,6 @@ class MarketRegistry {
         const defaultThreshold = globalDefaultThreshold ? parseFloat(globalDefaultThreshold) : null;
 
         const client = await this.pool.connect();
-
         this.marketsCache = null; // Invalidate cache
 
         try {
@@ -283,58 +286,34 @@ class MarketRegistry {
                 await client.query('UPDATE markets SET active = 0 WHERE active = 1');
             }
 
+            const marketsBatch = [];
+            const tokensBatch = [];
             const activeConditionIds = [];
-
-            // When setWatched is false, preserve existing watched value; otherwise set to 1
-            const marketQuery = `
-                INSERT INTO markets (condition_id, slug, description, event_slug, threshold, end_date, image, group_date, tags, active, watched, updated_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, ${options.setWatched ? '1' : 'COALESCE((SELECT watched FROM markets WHERE condition_id = $1::varchar), 0)'}, CURRENT_TIMESTAMP)
-                ON CONFLICT(condition_id) DO UPDATE SET
-                    slug = COALESCE(EXCLUDED.slug, markets.slug),
-                    description = COALESCE(EXCLUDED.description, markets.description),
-                    event_slug = COALESCE(EXCLUDED.event_slug, markets.event_slug),
-                    threshold = COALESCE(EXCLUDED.threshold, markets.threshold),
-                    end_date = COALESCE(EXCLUDED.end_date, markets.end_date),
-                    image = COALESCE(EXCLUDED.image, markets.image),
-                    group_date = COALESCE(EXCLUDED.group_date, markets.group_date),
-                    tags = COALESCE(EXCLUDED.tags, markets.tags),
-                    active = 1,
-                    ${options.setWatched ? 'watched = 1,' : ''}
-                    updated_at = CURRENT_TIMESTAMP
-                RETURNING condition_id
-            `;
-
-            const tokenQuery = `
-                INSERT INTO market_tokens (condition_id, token_id, outcome, price, active)
-                VALUES ($1, $2, $3, $4, TRUE)
-                ON CONFLICT (token_id) DO UPDATE SET
-                    active = TRUE,
-                    price = COALESCE(EXCLUDED.price, market_tokens.price),
-                    condition_id = EXCLUDED.condition_id
-            `;
 
             for (const market of markets) {
                 let { threshold } = market;
                 if (threshold === null || threshold === undefined) {
                     threshold = defaultThreshold;
                 }
-
                 const normalizedConditionId = this.normalizeConditionId(market.conditionId);
-
-                // Ensure tags is an array or null
                 const tags = Array.isArray(market.tags) ? market.tags : null;
 
-                await client.query(marketQuery, [
-                    normalizedConditionId,
-                    market.slug,
-                    market.description,
-                    market.eventSlug,
-                    threshold,
-                    market.endDate,
-                    market.image,
-                    market.groupDate,
-                    tags
-                ]);
+                marketsBatch.push({
+                    condition_id: normalizedConditionId,
+                    slug: market.slug,
+                    description: market.description,
+                    event_slug: market.eventSlug,
+                    threshold: threshold,
+                    end_date: market.endDate,
+                    image: market.image,
+                    group_date: market.groupDate,
+                    tags: tags,
+                    volume: market.volume || 0,
+                    liquidity: market.liquidity || 0,
+                    watched_val: options.setWatched ? 1 : 0 // Default for access in query
+                });
+
+                activeConditionIds.push(normalizedConditionId);
 
                 // Handle Tokens & Prices
                 if (market.clobTokenIds) {
@@ -354,18 +333,61 @@ class MarketRegistry {
 
                     if (Array.isArray(tokens) && tokens.length >= 2) {
                         const yesId = tokens[0]?.toString();
-                        const noId = tokens[1]?.toString();
+                        const noId = tokens[1]?.toString(); // Fixed: was tokens[0] in legacy code sometimes? No used 1.
 
                         // Parse prices safely (ensure float)
                         const yesPrice = prices[0] ? parseFloat(prices[0]) : null;
                         const noPrice = prices[1] ? parseFloat(prices[1]) : null;
 
-                        if (yesId) await client.query(tokenQuery, [normalizedConditionId, yesId, 'YES', yesPrice]);
-                        if (noId) await client.query(tokenQuery, [normalizedConditionId, noId, 'NO', noPrice]);
+                        if (yesId) tokensBatch.push({ condition_id: normalizedConditionId, token_id: yesId, outcome: 'YES', price: yesPrice });
+                        if (noId) tokensBatch.push({ condition_id: normalizedConditionId, token_id: noId, outcome: 'NO', price: noPrice });
                     }
                 }
+            }
 
-                activeConditionIds.push(normalizedConditionId);
+            // 1. Batch Insert Markets
+            if (marketsBatch.length > 0) {
+                await client.query(`
+                    INSERT INTO markets (condition_id, slug, description, event_slug, threshold, end_date, image, group_date, tags, volume, liquidity, active, watched, updated_at)
+                    SELECT 
+                        condition_id, slug, description, event_slug, threshold, end_date, image, group_date, tags, volume, liquidity, 
+                        1 as active, 
+                        watched_val as watched, 
+                        CURRENT_TIMESTAMP
+                    FROM jsonb_to_recordset($1::jsonb) AS x(
+                        condition_id text, slug text, description text, event_slug text, threshold real, 
+                        end_date text, image text, group_date text, tags text[], volume real, liquidity real, watched_val int
+                    )
+                    ON CONFLICT(condition_id) DO UPDATE SET
+                        slug = COALESCE(EXCLUDED.slug, markets.slug),
+                        description = COALESCE(EXCLUDED.description, markets.description),
+                        event_slug = COALESCE(EXCLUDED.event_slug, markets.event_slug),
+                        threshold = COALESCE(EXCLUDED.threshold, markets.threshold),
+                        end_date = COALESCE(EXCLUDED.end_date, markets.end_date),
+                        image = COALESCE(EXCLUDED.image, markets.image),
+                        group_date = COALESCE(EXCLUDED.group_date, markets.group_date),
+                        tags = COALESCE(EXCLUDED.tags, markets.tags),
+                        volume = EXCLUDED.volume,
+                        liquidity = EXCLUDED.liquidity,
+                        active = 1,
+                        watched = CASE WHEN $2 = true THEN EXCLUDED.watched ELSE markets.watched END,
+                        updated_at = CURRENT_TIMESTAMP
+                `, [JSON.stringify(marketsBatch), options.setWatched]);
+            }
+
+            // 2. Batch Insert Tokens
+            if (tokensBatch.length > 0) {
+                await client.query(`
+                    INSERT INTO market_tokens (condition_id, token_id, outcome, price, active)
+                    SELECT condition_id, token_id, outcome, price, TRUE
+                    FROM jsonb_to_recordset($1::jsonb) AS x(
+                        condition_id text, token_id text, outcome text, price real
+                    )
+                    ON CONFLICT (token_id) DO UPDATE SET
+                        active = TRUE,
+                        price = COALESCE(EXCLUDED.price, market_tokens.price),
+                        condition_id = EXCLUDED.condition_id
+                `, [JSON.stringify(tokensBatch)]);
             }
 
             await client.query('COMMIT');
