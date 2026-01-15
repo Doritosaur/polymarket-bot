@@ -137,7 +137,7 @@ export const getTooltipHtml = (object: any): string | null => {
                 <div style="display: flex; gap: 16px;">
                     <div>
                         <span style="font-size: 10px; color: ${TOOLTIP_THEME.textMain}; opacity: 0.5; text-transform: uppercase;">YES</span>
-                        <div style="font-size: 14px; font-weight: 700; color: ${isTopUp ? TOOLTIP_THEME.textMain : TOOLTIP_THEME.textDim};">${topYesP}%</div>
+                        <div style="font-size: 14px; font-weight: 700; color: ${TOOLTIP_THEME.textMain};">${topYesP}%</div>
                     </div>
                     <div>
                         <span style="font-size: 10px; color: ${TOOLTIP_THEME.textMain}; opacity: 0.5; text-transform: uppercase;">NO</span>

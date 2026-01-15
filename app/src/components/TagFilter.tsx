@@ -41,7 +41,8 @@ export function TagFilter() {
                     variant="outline"
                     className={`
                         h-7 text-xs px-3
-                        border-primary/50 text-primary bg-black/80 backdrop-blur-md hover:bg-primary/20 hover:text-white
+                        border-primary/50 text-primary/50 bg-black/80 backdrop-blur-md hover:bg-primary/10 hover:text-primary
+                        data-[state=open]:bg-primary/10 data-[state=open]:text-primary
                         ${selectedTags.size > 0 ? 'bg-primary/20 shadow-[0_0_10px_rgba(0,255,159,0.3)]' : ''}
                     `}
                 >
