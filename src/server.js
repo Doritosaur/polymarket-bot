@@ -24,6 +24,7 @@ export function createServer() {
     next();
   });
 
+
   app.get('/health', (req, res) => {
     res.json({
       status: 'ok',
@@ -31,6 +32,8 @@ export function createServer() {
       uptime: process.uptime()
     });
   });
+
+
 
   // ============ AUTH ENDPOINTS ============
   app.post('/api/auth/login', async (req, res) => {

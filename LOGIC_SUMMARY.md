@@ -32,6 +32,8 @@ graph TD
     *   **Market Fetcher**: Periodically syncs markets.
 *   **Logic**:
     *   Filters trades below `MIN_AMOUNT_THRESHOLD`.
+    *   **Signal Engine**: Analyzes every trade for anomalies (Whales, Velocity, Panic) and broadcasts `signal` events.
+    *   **Map Engine**: Broadcasts batched market updates to the frontend.
     *   Pushes trade data to **Redis Queue** (Fire-and-Forget).
     *   Listens to **Redis Pub/Sub** for dynamic configuration changes (added markets, threshold updates) from the Bot Service.
 
@@ -57,6 +59,13 @@ graph TD
     *   Stores `clob_token_ids` for subscriptions.
     *   Stores `event_slug` to allow bulk deletion of markets by event.
     *   Persists `minAmountThreshold` so dynamic changes survive restarts.
+
+### 5. Frontend Service (`app/`)
+*   **Role**: Real-time Visualization Dashboard (React + Vite).
+*   **Components**:
+    *   **MapController**: WebGL Map (MapLibre) powered by a WebWorker.
+    *   **SignalStore**: Visualizes real-time signals on the map.
+    *   **GeoMapper**: Client-side geocoding engine to place markets on the world map.
 
 ---
 

@@ -21,6 +21,7 @@ import {
 import { useMarketStore, type DisplayMarket } from './store/marketStore';
 import { useAuthStore } from './store/authStore';
 import { useSignalStore, type Signal } from './store/signalStore';
+import { getMarketCoordinates } from './utils/GeoMapper';
 import { SOCKET_URL } from './config';
 
 function App() {
@@ -55,10 +56,15 @@ function App() {
         };
     }, [isAuthenticated, token]);
 
+
+
+
+
     useEffect(() => {
         if (!socket) return;
 
-        // Pin Handlers (these still use socket)
+
+
         const onPinsResponse = (data: any) => {
             if (data.pins) {
                 useMarketStore.getState().setPinnedIds(data.pins);
@@ -72,7 +78,6 @@ function App() {
 
         socket.on('pins_response', onPinsResponse);
         socket.on('pin_toggled', onPinToggled);
-        // socket.on('tag_locations', onTagLocations); // Deprecated
 
         const onConnect = () => {
             setStatus('Connected');
@@ -153,6 +158,23 @@ function App() {
 
         // Handle signal events from SignalEngine
         const onSignal = (signal: Signal) => {
+            // Resolve coordinates if missing (critical for Map display)
+            if (!signal.coordinates && (signal.metadata.marketTitle || signal.region)) {
+                // Try to resolve using market title/question + tags if available
+                const searchText = signal.metadata.marketTitle || signal.region;
+                // Tags might be in metadata or we might not have them easily, just use text for now
+                const coords = getMarketCoordinates(searchText);
+
+                if (coords) {
+                    signal.coordinates = { lat: coords.lat, lng: coords.lng };
+                    // Ensure region is set if missing
+                    if (!signal.region) {
+                        signal.region = coords.country;
+                    }
+                    console.log(`[Signal] Resolved coords for ${searchText}:`, coords);
+                }
+            }
+
             useSignalStore.getState().addSignal(signal);
         };
         socket.on('signal', onSignal);
@@ -168,6 +190,14 @@ function App() {
             socket.off('signal', onSignal);
         };
     }, [socket]);
+
+    // Signal Garbage Collection (Runs every 5 seconds)
+    useEffect(() => {
+        const interval = setInterval(() => {
+            useSignalStore.getState().clearOldSignals();
+        }, 5000);
+        return () => clearInterval(interval);
+    }, []);
 
     if (!isAuthenticated) {
         return <LoginScreen />;

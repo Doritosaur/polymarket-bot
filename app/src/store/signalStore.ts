@@ -79,6 +79,9 @@ interface SignalState {
     // Animation state: tracks new signals for pulse effects
     newSignals: Set<string>;
 
+    // Duration for which signals are kept in the store (in ms)
+    signalDuration: number;
+
     // Actions
     addSignal: (signal: Signal) => void;
     updateRegion: (regionId: string, state: Partial<RegionState>) => void;
@@ -88,6 +91,7 @@ interface SignalState {
     clearFilters: () => void;
     clearOldSignals: () => void;
     markSignalSeen: (signalId: string) => void;
+    setSignalDuration: (duration: number) => void;
 
     // Computed getters
     getFilteredSignals: () => Signal[];
@@ -101,6 +105,7 @@ export const useSignalStore = create<SignalState>((set, get) => ({
     signals: [],
     regions: new Map(),
     newSignals: new Set(),
+    signalDuration: 120000, // Default 2 minutes (120000ms)
 
     // Default filters: show all types, all severities, all regions
     filters: {
@@ -208,12 +213,10 @@ export const useSignalStore = create<SignalState>((set, get) => ({
 
     clearOldSignals: () => set((state) => {
         const now = Date.now();
-        const cutoff = now - 300000; // 5 minutes
+        const cutoff = now - state.signalDuration;
 
-        // Clear old signals
         const filteredSignals = state.signals.filter(s => s.timestamp > cutoff);
 
-        // Clear old region activity
         const newRegions = new Map(state.regions);
         for (const [, region] of newRegions) {
             region.activeSignals = region.activeSignals.filter(s => s.timestamp > cutoff);
@@ -221,6 +224,8 @@ export const useSignalStore = create<SignalState>((set, get) => ({
 
         return { signals: filteredSignals, regions: newRegions };
     }),
+
+    setSignalDuration: (duration) => set(() => ({ signalDuration: duration })),
 
     markSignalSeen: (signalId) => set((state) => {
         const newSet = new Set(state.newSignals);

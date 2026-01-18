@@ -155,7 +155,7 @@ class TradeProcessor {
                 size: parseFloat(update.size),
                 side: update.side,
                 timestamp: tradeTs,
-                marketTitle: assetInfo.question,
+                marketTitle: assetInfo.slug,
                 outcome: assetInfo.outcome,
                 region: assetInfo.region || 'global',
                 coordinates: assetInfo.coordinates

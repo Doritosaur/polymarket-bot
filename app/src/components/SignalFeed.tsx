@@ -18,7 +18,8 @@ import {
     Users,        // Regional
     RefreshCw,    // Reversal
     AlertTriangle,
-    Filter
+    Filter,
+    Clock
 } from 'lucide-react';
 import {
     Popover,
@@ -154,15 +155,15 @@ function SignalItem({ signal, isNew, onFlyTo }: SignalItemProps) {
 }
 
 export function SignalFeed() {
-    const {
-        signals,
-        newSignals,
-        filters,
-        setTypeFilter,
-        setMinSeverity,
-        clearFilters,
-        clearOldSignals
-    } = useSignalStore();
+    const signals = useSignalStore(state => state.signals);
+    const newSignals = useSignalStore(state => state.newSignals);
+    const filters = useSignalStore(state => state.filters);
+    const setTypeFilter = useSignalStore(state => state.setTypeFilter);
+    const setMinSeverity = useSignalStore(state => state.setMinSeverity);
+    const clearFilters = useSignalStore(state => state.clearFilters);
+    const clearOldSignals = useSignalStore(state => state.clearOldSignals);
+    const signalDuration = useSignalStore(state => state.signalDuration);
+    const setSignalDuration = useSignalStore(state => state.setSignalDuration);
 
     const [isFilterOpen, setIsFilterOpen] = useState(false);
 
@@ -203,7 +204,7 @@ export function SignalFeed() {
     return (
         <div className="flex flex-col h-full">
             {/* Header */}
-            <div className="flex items-center justify-between p-3 border-b border-primary/30">
+            <div className="p-4 border-b border-primary/20 flex justify-between items-center bg-primary/5">
                 <div className="flex items-center gap-2">
                     <AlertTriangle className="w-4 h-4 text-primary" />
                     <span className="text-sm font-bold text-primary uppercase tracking-wider">Signals</span>
@@ -214,79 +215,107 @@ export function SignalFeed() {
                     )}
                 </div>
 
-                <Popover open={isFilterOpen} onOpenChange={setIsFilterOpen}>
-                    <PopoverTrigger asChild>
-                        <button className="relative p-1.5 hover:bg-primary/20 rounded transition">
-                            <Filter className="w-4 h-4 text-primary" />
-                            {activeFiltersCount > 0 && (
-                                <span className="absolute -top-1 -right-1 w-3 h-3 bg-primary text-black text-[8px] font-bold rounded-full flex items-center justify-center">
-                                    {activeFiltersCount}
-                                </span>
-                            )}
-                        </button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-64 bg-black border-2 border-primary p-3" align="end">
-                        <div className="space-y-4">
-                            <div className="flex items-center justify-between">
-                                <span className="text-xs text-primary uppercase tracking-wider">Filters</span>
-                                <button
-                                    onClick={clearFilters}
-                                    className="text-[10px] text-primary/50 hover:text-primary"
-                                >
-                                    Reset
-                                </button>
+                <div className="flex gap-2">
+                    {/* Duration Selector */}
+                    <Popover>
+                        <PopoverTrigger asChild>
+                            <button className="p-1.5 hover:bg-primary/20 rounded transition text-primary/70 hover:text-primary">
+                                <Clock className="w-4 h-4" />
+                            </button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-40 bg-black/95 border border-primary/30 p-2 backdrop-blur-md">
+                            <div className="space-y-1">
+                                <div className="text-xs font-bold text-primary/50 px-2 py-1 mb-1">DURATION</div>
+                                {[2, 5, 10].map(mins => (
+                                    <button
+                                        key={mins}
+                                        onClick={() => setSignalDuration(mins * 60000)}
+                                        className={`w-full text-left text-xs px-2 py-1.5 rounded hover:bg-primary/20 transition flex justify-between items-center ${signalDuration === mins * 60000 ? 'text-primary bg-primary/10' : 'text-primary/70'
+                                            }`}
+                                    >
+                                        <span>{mins} Minutes</span>
+                                        {signalDuration === mins * 60000 && <span className="w-1.5 h-1.5 rounded-full bg-primary" />}
+                                    </button>
+                                ))}
                             </div>
+                        </PopoverContent>
+                    </Popover>
 
-                            {/* Signal Type Filters */}
-                            <div className="space-y-2">
-                                <span className="text-[10px] text-primary/70 uppercase">Signal Types</span>
-                                <div className="flex flex-wrap gap-1">
-                                    {Object.entries(SIGNAL_TYPES).map(([key, type]) => {
-                                        const isActive = filters.types.has(type);
-                                        const config = SIGNAL_CONFIG[type];
-                                        return (
-                                            <button
-                                                key={key}
-                                                onClick={() => setTypeFilter(type, !isActive)}
-                                                className={`
+                    {/* Filter Selector */}
+                    <Popover open={isFilterOpen} onOpenChange={setIsFilterOpen}>
+                        <PopoverTrigger asChild>
+                            <button className="relative p-1.5 hover:bg-primary/20 rounded transition">
+                                <Filter className="w-4 h-4 text-primary" />
+                                {activeFiltersCount > 0 && (
+                                    <span className="absolute -top-1 -right-1 w-3 h-3 bg-primary text-black text-[8px] font-bold rounded-full flex items-center justify-center">
+                                        {activeFiltersCount}
+                                    </span>
+                                )}
+                            </button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-64 bg-black border-2 border-primary p-3" align="end">
+                            <div className="space-y-4">
+                                <div className="flex items-center justify-between">
+                                    <span className="text-xs text-primary uppercase tracking-wider">Filters</span>
+                                    <button
+                                        onClick={clearFilters}
+                                        className="text-[10px] text-primary/50 hover:text-primary"
+                                    >
+                                        Reset
+                                    </button>
+                                </div>
+
+                                {/* Signal Type Filters */}
+                                <div className="space-y-2">
+                                    <span className="text-[10px] text-primary/70 uppercase">Signal Types</span>
+                                    <div className="flex flex-wrap gap-1">
+                                        {Object.entries(SIGNAL_TYPES).map(([key, type]) => {
+                                            const isActive = filters.types.has(type);
+                                            const config = SIGNAL_CONFIG[type];
+                                            return (
+                                                <button
+                                                    key={key}
+                                                    onClick={() => setTypeFilter(type, !isActive)}
+                                                    className={`
                                                     px-2 py-0.5 text-[10px] border rounded-none transition
                                                     ${isActive
+                                                            ? 'border-primary text-primary bg-primary/20'
+                                                            : 'border-primary/30 text-primary/50 hover:border-primary/50'
+                                                        }
+                                                `}
+                                                >
+                                                    {config.label}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+
+                                {/* Severity Filter */}
+                                <div className="space-y-2">
+                                    <span className="text-[10px] text-primary/70 uppercase">Min Severity</span>
+                                    <div className="flex gap-1">
+                                        {SEVERITY_LEVELS.map(severity => (
+                                            <button
+                                                key={severity}
+                                                onClick={() => setMinSeverity(severity)}
+                                                className={`
+                                                flex-1 px-2 py-1 text-[10px] uppercase border rounded-none transition
+                                                ${filters.minSeverity === severity
                                                         ? 'border-primary text-primary bg-primary/20'
                                                         : 'border-primary/30 text-primary/50 hover:border-primary/50'
                                                     }
-                                                `}
-                                            >
-                                                {config.label}
-                                            </button>
-                                        );
-                                    })}
-                                </div>
-                            </div>
-
-                            {/* Severity Filter */}
-                            <div className="space-y-2">
-                                <span className="text-[10px] text-primary/70 uppercase">Min Severity</span>
-                                <div className="flex gap-1">
-                                    {SEVERITY_LEVELS.map(severity => (
-                                        <button
-                                            key={severity}
-                                            onClick={() => setMinSeverity(severity)}
-                                            className={`
-                                                flex-1 px-2 py-1 text-[10px] uppercase border rounded-none transition
-                                                ${filters.minSeverity === severity
-                                                    ? 'border-primary text-primary bg-primary/20'
-                                                    : 'border-primary/30 text-primary/50 hover:border-primary/50'
-                                                }
                                             `}
-                                        >
-                                            {severity}
-                                        </button>
-                                    ))}
+                                            >
+                                                {severity}
+                                            </button>
+                                        ))}
+                                    </div>
                                 </div>
                             </div>
-                        </div>
-                    </PopoverContent>
-                </Popover>
+                        </PopoverContent>
+                    </Popover>
+                </div>
             </div>
 
             {/* Signal List */}

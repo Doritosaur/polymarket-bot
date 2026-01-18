@@ -2,7 +2,7 @@ import { useCallback } from 'react';
 import { MapController } from './MapController';
 import { EventList } from './EventList'; // Keep imports
 import { FilterBar } from './FilterBar'; // Changed from TagFilter
-import { MarketSearch } from './MarketSearch';
+// import { MarketSearch } from './MarketSearch';
 import { ZoneFilter } from './ZoneFilter';
 import { useSplitViewStore } from '../store/splitViewStore';
 
@@ -57,8 +57,11 @@ export function SplitViewLayout() {
                             <button onClick={clearGeoFilter} className="ml-2 text-destructive hover:text-destructive/80">✕</button>
                         )}
                     </div>
+                </div>
 
-                    <MarketSearch onSelectMarket={flyTo} />
+                {/* Right Side Controls */}
+                <div className="absolute top-4 right-4 z-30 flex items-center gap-2 pointer-events-auto">
+                    {/* <MarketSearch onSelectMarket={flyTo} /> */}
                     <ZoneFilter onSelectZone={flyTo} />
                     <FilterBar />
                 </div>

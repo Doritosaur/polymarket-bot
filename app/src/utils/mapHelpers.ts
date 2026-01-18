@@ -215,3 +215,62 @@ export const getTooltipHtml = (object: any): string | null => {
         </div>
     `;
 };
+
+import { renderToStaticMarkup } from 'react-dom/server';
+import { Fish, TrendingUp, Zap, Globe, RefreshCw, Activity } from 'lucide-react';
+import React from 'react';
+
+export const getSignalTooltipHtml = (p: any): string => {
+    if (!p) return '';
+
+    // Icon Mapping
+    let IconComponent = Activity;
+    if (p.type === 'whale_activity') IconComponent = Fish;
+    else if (p.type === 'volume_anomaly') IconComponent = TrendingUp;
+    else if (p.type === 'price_velocity') IconComponent = Zap;
+    else if (p.type === 'regional_surge') IconComponent = Globe;
+    else if (p.type === 'market_reversal') IconComponent = RefreshCw;
+
+    const iconHtml = renderToStaticMarkup(
+        React.createElement(IconComponent, { size: 16, color: "#fff", strokeWidth: 2.5 })
+    );
+
+    let valueDisplay = '';
+    if (p.type === 'whale_activity' || p.type === 'volume_anomaly') {
+        const v = parseFloat(p.value || '0');
+        if (v >= 1000000) valueDisplay = `$${(v / 1000000).toFixed(1)}M`;
+        else if (v >= 1000) valueDisplay = `$${(v / 1000).toFixed(1)}K`;
+        else valueDisplay = `$${v.toFixed(0)}`;
+    } else if (p.type === 'price_velocity') {
+        valueDisplay = `${parseFloat(p.value || '0').toFixed(1)}%/min`;
+    } else {
+        valueDisplay = p.value;
+    }
+
+    return `
+        <div style="
+            background: #000;
+            border: 2px solid ${p.severity === 'critical' ? '#ef4444' : '#10b981'};
+            padding: 12px;
+            font-family: 'JetBrains Mono', monospace;
+            color: #10b981;
+        ">
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                ${iconHtml}
+                <div style="font-weight: bold; color: #fff;">${p.label}</div>
+            </div>
+            <div style="font-size: 10px; opacity: 0.7; margin-bottom: 8px;">${p.marketTitle || 'Unknown Market'}</div>
+            
+            <div style="display: flex; gap: 12px; font-size: 12px;">
+                <div>
+                    <span style="opacity: 0.5; font-size: 8px; text-transform: uppercase;">Value</span>
+                    <div style="font-weight: bold;">${valueDisplay}</div>
+                </div>
+                <div>
+                    <span style="opacity: 0.5; font-size: 8px; text-transform: uppercase;">Severity</span>
+                    <div style="font-weight: bold; color: ${p.severity === 'critical' ? '#ef4444' : p.severity === 'high' ? '#f97316' : '#10b981'}">${p.severity.toUpperCase()}</div>
+                </div>
+            </div>
+        </div>
+    `;
+};

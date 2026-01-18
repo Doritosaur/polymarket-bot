@@ -97,6 +97,15 @@ curl -X DELETE http://localhost:3000/api/events/presidential-election-2024 \
 ## How It Works
 
 1. **Ingestion Service**: Connects to Polymarket's **CLOB (Central Limit Order Book)** via WebSocket for real-time trade data. It filters trades by `MIN_AMOUNT_THRESHOLD` and pushes valid trades to a **Redis Queue**.
-2. **Redis**: Acts as a message broker between the ingestion service and the bot.
-3. **Bot Service**: Consumes trades from Redis, calculates implied probabilities locally (YES + NO = 100%), and formats Discord embeds.
-4. **Notification**: Alerts are sent to the configured Discord channel.
+2.  **Signal Engine**: Analyzes every single trade in real-time to detect whales ($20k+), volume anomalies, price velocity, and regional surges.
+    *   [📖 Read Signal Engine Docs](SIGNAL_ENGINE.md)
+3.  **Map Engine**: A high-performance visualization system that processes thousands of markets in a WebWorker and renders them using MapLibre GL.
+    *   [📖 Read Map Engine Docs](MAP_ENGINE.md)
+4.  **Bot Service**: Consumes trades from Redis, calculates implied probabilities locally (YES + NO = 100%), and formats Discord embeds.
+
+## Documentation
+
+- [**Signal Engine**](SIGNAL_ENGINE.md): Deep dive into detection algorithms (Whale, Velocity, Anomaly).
+- [**Map Engine**](MAP_ENGINE.md): How the WebGL map handles real-time data and geocoding.
+- [**Logic Summary**](LOGIC_SUMMARY.md): Overview of the microservices architecture.
+

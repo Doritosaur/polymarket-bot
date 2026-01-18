@@ -9,7 +9,7 @@ import { isCountryInZone } from "../utils/ZoneMapping";
 // @ts-ignore
 import ClusterWorker from '../workers/cluster.worker?worker';
 // Map click now navigates to EventList instead of opening MarketDetailPanel
-import { getTooltipHtml } from '../utils/mapHelpers';
+import { getTooltipHtml, getSignalTooltipHtml } from '../utils/mapHelpers';
 
 import 'maplibre-gl/dist/maplibre-gl.css';
 import {
@@ -100,9 +100,6 @@ export function MapController() {
                 type: 'geojson',
                 data: { type: 'FeatureCollection', features: [] }
             });
-
-            // Layer: Top Markets Glow (Spatially distributed top markets)
-            // Layer: Top Markets Glow (Spatially distributed top markets)
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             map.addLayer(TOP_MARKETS_GLOW_LAYER as any);
 
@@ -115,9 +112,6 @@ export function MapController() {
                 type: 'geojson',
                 data: { type: 'FeatureCollection', features: [] }
             });
-
-            // Signal Pulse Ring (outer glow)
-            // Signal Pulse Ring (outer glow)
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             map.addLayer(SIGNAL_PULSE_LAYER as any);
 
@@ -158,22 +152,35 @@ export function MapController() {
                     className: 'market-tooltip'
                 });
 
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 const html = getTooltipHtml({ ...feature, properties: { ...feature.properties, ...m } } as any);
                 if (html) {
                     popup.setLngLat(lngLat).setHTML(html).addTo(map);
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
                     (map as any)._currentTooltip = popup;
                 }
+            };
+
+            const showSignalTooltip = (lngLat: maplibregl.LngLat, feature: maplibregl.MapGeoJSONFeature) => {
+                cleanupTooltip();
+                const p = feature.properties;
+                if (!p) return;
+
+                const popup = new maplibregl.Popup({
+                    closeButton: false,
+                    closeOnClick: true,
+                    className: 'signal-tooltip',
+                    maxWidth: '300px'
+                });
+
+                const html = getSignalTooltipHtml(p);
+
+                popup.setLngLat(lngLat).setHTML(html).addTo(map);
+                (map as any)._currentTooltip = popup;
             };
 
 
 
 
 
-            // Top Markets Click Handlers (all 3 layers)
-            // Top Markets Click Handlers (all 3 layers)
-            // Top Markets Click Handlers (Glow and Core)
             const topMarketLayers = ['top-markets-glow', 'top-markets-core'];
 
             topMarketLayers.forEach(layerId => {
@@ -213,6 +220,30 @@ export function MapController() {
                             zoom: 8,
                             essential: true
                         });
+                    }
+                });
+            });
+
+            // Signal Layer Click Handlers
+            const signalLayers = ['signal-markers', 'signal-pulse'];
+            signalLayers.forEach(layerId => {
+                map.on('mouseenter', layerId, (e) => {
+                    map.getCanvas().style.cursor = 'pointer';
+                    if (e.features && e.features.length > 0) {
+                        showSignalTooltip(e.lngLat, e.features[0]);
+                    }
+                });
+
+                map.on('mouseleave', layerId, () => {
+                    map.getCanvas().style.cursor = '';
+                    // Optional: cleanupTooltip(); // Keep tooltip open for a bit or until click logic? 
+                    // For now, let's auto-close on leave like top markets
+                    cleanupTooltip();
+                });
+
+                map.on('click', layerId, (e) => {
+                    if (e.features && e.features.length > 0) {
+                        showSignalTooltip(e.lngLat, e.features[0]);
                     }
                 });
             });
@@ -381,11 +412,11 @@ export function MapController() {
 
         const severityToNum = { low: 1, medium: 2, high: 3, critical: 4 };
         const typeLabels: Record<string, string> = {
-            [SIGNAL_TYPES.WHALE_ACTIVITY]: '🐋 Whale',
-            [SIGNAL_TYPES.VOLUME_ANOMALY]: '📈 Volume',
-            [SIGNAL_TYPES.PRICE_VELOCITY]: '⚡ Velocity',
-            [SIGNAL_TYPES.REGIONAL_SURGE]: '🌍 Surge',
-            [SIGNAL_TYPES.MARKET_REVERSAL]: '🔄 Reversal'
+            [SIGNAL_TYPES.WHALE_ACTIVITY]: 'Whale',
+            [SIGNAL_TYPES.VOLUME_ANOMALY]: 'Volume',
+            [SIGNAL_TYPES.PRICE_VELOCITY]: 'Velocity',
+            [SIGNAL_TYPES.REGIONAL_SURGE]: 'Surge',
+            [SIGNAL_TYPES.MARKET_REVERSAL]: 'Reversal'
         };
 
         // Convert signals to GeoJSON features
@@ -404,7 +435,10 @@ export function MapController() {
                     severity_num: severityToNum[s.severity] || 1,
                     label: typeLabels[s.type] || s.type,
                     isNew: newSignals.has(s.id),
-                    timestamp: s.timestamp
+                    timestamp: s.timestamp,
+                    // Pass formatted metadata for tooltip
+                    marketTitle: s.metadata.marketTitle || s.region,
+                    value: s.value
                 }
             }));
 
