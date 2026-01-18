@@ -1,221 +1,422 @@
+// ============================================================================
+// TYPES & INTERFACES
+// ============================================================================
+
 export interface Coordinates {
     lat: number;
     lng: number;
+    country: string;
+    state?: string;
+    geoLevel: 'country' | 'state' | 'city';
 }
 
-// Core location database - countries, regions, cities
-const LOCATION_DB: Record<string, Coordinates> = {
-    // === COUNTRIES ===
-    'argentina': { lat: -38.4, lng: -63.6 },
-    'australia': { lat: -25.2, lng: 133.7 },
-    'brazil': { lat: -14.2, lng: -51.9 },
-    'canada': { lat: 56.1, lng: -106.3 },
-    'china': { lat: 35.8, lng: 104.1 },
-    'england': { lat: 52.3, lng: -1.1 },
-    'france': { lat: 46.2, lng: 2.2 },
-    'germany': { lat: 51.1, lng: 10.4 },
-    'greenland': { lat: 71.7, lng: -42.6 },
-    'hungary': { lat: 47.1, lng: 19.5 },
-    'india': { lat: 20.5, lng: 78.9 },
-    'iran': { lat: 32.4, lng: 53.6 },
-    'israel': { lat: 31.0, lng: 34.8 },
-    'italy': { lat: 41.9, lng: 12.5 },
-    'japan': { lat: 36.2, lng: 138.2 },
-    'korea': { lat: 37.5, lng: 126.9 },
-    'lebanon': { lat: 33.8, lng: 35.8 },
-    'mexico': { lat: 23.6, lng: -102.5 },
-    'netherlands': { lat: 52.1, lng: 5.2 },
-    'pakistan': { lat: 30.3, lng: 69.3 },
-    'palestine': { lat: 31.9, lng: 35.2 },
-    'poland': { lat: 51.9, lng: 19.1 },
-    'portugal': { lat: 39.3, lng: -8.2 },
-    'russia': { lat: 61.5, lng: 105.3 },
-    'saudi': { lat: 23.8, lng: 45.0 },
-    'spain': { lat: 40.4, lng: -3.7 },
-    'sweden': { lat: 60.1, lng: 18.6 },
-    'syria': { lat: 34.8, lng: 38.9 },
-    'taiwan': { lat: 23.6, lng: 120.9 },
-    'turkey': { lat: 38.9, lng: 35.2 },
-    'uk': { lat: 55.3, lng: -3.4 },
-    'ukraine': { lat: 48.3, lng: 31.1 },
-    'venezuela': { lat: 6.4, lng: -66.5 },
-    'dutch': { lat: 52.1, lng: 5.2 },
+export type GeoLevel = 'world' | 'country' | 'state' | 'city';
 
-    // === REGIONS ===
-    'europe': { lat: 50.1, lng: 9.5 },
-    'asia': { lat: 34.0, lng: 100.6 },
-    'africa': { lat: 1.6, lng: 20.9 },
-    'middle-east': { lat: 29.3, lng: 47.4 },
-    'gaza': { lat: 31.5, lng: 34.4 },
-    'crimea': { lat: 44.9, lng: 34.0 },
-    'nato': { lat: 50.8, lng: 4.3 }, // Brussels
+export interface LocationEntry {
+    lat: number;
+    lng: number;
+    country: string;
+    state?: string;
+    geoLevel: 'country' | 'state' | 'city';
+}
 
-    // === US STATES/CITIES ===
-    'california': { lat: 36.7, lng: -119.4 },
-    'texas': { lat: 31.0, lng: -97.5 },
-    'new-york': { lat: 40.7, lng: -74.0 },
-    'nyc': { lat: 40.7, lng: -74.0 },
-    'los-angeles': { lat: 34.0, lng: -118.2 },
-    'washington': { lat: 38.9, lng: -77.0 },
+// ============================================================================
+// CONFIGURATION DATA - Separated by Category for Maintainability
+// ============================================================================
 
-    'dc': { lat: 38.9, lng: -77.0 },
-    // Cities
-    'london': { lat: 51.5, lng: -0.1 },
-    'paris': { lat: 48.8, lng: 2.3 },
-    'beijing': { lat: 39.9, lng: 116.4 },
-    'moscow': { lat: 55.7, lng: 37.6 },
-    'kiev': { lat: 50.4, lng: 30.5 },
-    'tokyo': { lat: 35.6, lng: 139.6 },
-
-    // === TOPIC HUBS (Restored) ===
-    'politics': { lat: 38.9, lng: -77.0 },    // DC
-    'trump': { lat: 38.9, lng: -77.0 },
-    'biden': { lat: 38.9, lng: -77.0 },
-    'congress': { lat: 38.9, lng: -77.0 },
-    'senate': { lat: 38.9, lng: -77.0 },
-    'house': { lat: 38.9, lng: -77.0 },
-    'scotus': { lat: 38.9, lng: -77.0 },
-    'fed': { lat: 38.9, lng: -77.0 },
-
-    'crypto': { lat: 40.7, lng: -74.0 },      // NYC
-    'bitcoin': { lat: 40.7, lng: -74.0 },
-    'ethereum': { lat: 40.7, lng: -74.0 },
-    'stocks': { lat: 40.7, lng: -74.0 },
-    'finance': { lat: 40.7, lng: -74.0 },
-    'economy': { lat: 40.7, lng: -74.0 },
-
-    'ai': { lat: 37.7, lng: -122.4 },         // SF
-    'openai': { lat: 37.7, lng: -122.4 },
-    'tech': { lat: 37.4, lng: -122.1 },
-    'apple': { lat: 37.3, lng: -122.0 },
-    'google': { lat: 37.4, lng: -122.0 },
-    'tesla': { lat: 30.2, lng: -97.7 },       // Austin
-    'spacex': { lat: 25.9, lng: -97.1 },      // Boca Chica
-
-    'nba': { lat: 40.7, lng: -74.0 },
-    'nfl': { lat: 39.0, lng: -94.5 },
-    'soccer': { lat: 51.5, lng: -0.1 },       // London
-    'oscars': { lat: 34.0, lng: -118.2 },     // LA
-    'movies': { lat: 34.0, lng: -118.2 },
+const COUNTRIES: Record<string, LocationEntry> = {
+    'afghanistan': { lat: 33.9, lng: 67.7, country: 'Afghanistan', geoLevel: 'country' },
+    'albania': { lat: 41.1, lng: 20.1, country: 'Albania', geoLevel: 'country' },
+    'algeria': { lat: 28.0, lng: 1.6, country: 'Algeria', geoLevel: 'country' },
+    'argentina': { lat: -38.4, lng: -63.6, country: 'Argentina', geoLevel: 'country' },
+    'australia': { lat: -25.2, lng: 133.7, country: 'Australia', geoLevel: 'country' },
+    'austria': { lat: 47.5, lng: 14.5, country: 'Austria', geoLevel: 'country' },
+    'bangladesh': { lat: 23.6, lng: 90.3, country: 'Bangladesh', geoLevel: 'country' },
+    'belgium': { lat: 50.5, lng: 4.4, country: 'Belgium', geoLevel: 'country' },
+    'brazil': { lat: -14.2, lng: -51.9, country: 'Brazil', geoLevel: 'country' },
+    'canada': { lat: 56.1, lng: -106.3, country: 'Canada', geoLevel: 'country' },
+    'china': { lat: 35.8, lng: 104.1, country: 'China', geoLevel: 'country' },
+    'colombia': { lat: 4.5, lng: -74.2, country: 'Colombia', geoLevel: 'country' },
+    'denmark': { lat: 56.2, lng: 9.5, country: 'Denmark', geoLevel: 'country' },
+    'egypt': { lat: 26.8, lng: 30.8, country: 'Egypt', geoLevel: 'country' },
+    'finland': { lat: 61.9, lng: 25.7, country: 'Finland', geoLevel: 'country' },
+    'france': { lat: 46.2, lng: 2.2, country: 'France', geoLevel: 'country' },
+    'germany': { lat: 51.1, lng: 10.4, country: 'Germany', geoLevel: 'country' },
+    'greece': { lat: 39.0, lng: 21.8, country: 'Greece', geoLevel: 'country' },
+    'greenland': { lat: 71.7, lng: -42.6, country: 'Greenland', geoLevel: 'country' },
+    'hungary': { lat: 47.1, lng: 19.5, country: 'Hungary', geoLevel: 'country' },
+    'india': { lat: 20.5, lng: 78.9, country: 'India', geoLevel: 'country' },
+    'indonesia': { lat: -0.7, lng: 113.9, country: 'Indonesia', geoLevel: 'country' },
+    'iran': { lat: 32.4, lng: 53.6, country: 'Iran', geoLevel: 'country' },
+    'iraq': { lat: 33.2, lng: 43.6, country: 'Iraq', geoLevel: 'country' },
+    'ireland': { lat: 53.4, lng: -8.2, country: 'Ireland', geoLevel: 'country' },
+    'israel': { lat: 31.0, lng: 34.8, country: 'Israel', geoLevel: 'country' },
+    'italy': { lat: 41.9, lng: 12.5, country: 'Italy', geoLevel: 'country' },
+    'japan': { lat: 36.2, lng: 138.2, country: 'Japan', geoLevel: 'country' },
+    'kenya': { lat: -0.0, lng: 37.9, country: 'Kenya', geoLevel: 'country' },
+    'lebanon': { lat: 33.8, lng: 35.8, country: 'Lebanon', geoLevel: 'country' },
+    'malaysia': { lat: 4.2, lng: 101.9, country: 'Malaysia', geoLevel: 'country' },
+    'mexico': { lat: 23.6, lng: -102.5, country: 'Mexico', geoLevel: 'country' },
+    'morocco': { lat: 31.7, lng: -7.0, country: 'Morocco', geoLevel: 'country' },
+    'netherlands': { lat: 52.1, lng: 5.2, country: 'Netherlands', geoLevel: 'country' },
+    'new zealand': { lat: -40.9, lng: 174.8, country: 'New Zealand', geoLevel: 'country' },
+    'nigeria': { lat: 9.0, lng: 8.6, country: 'Nigeria', geoLevel: 'country' },
+    'norway': { lat: 60.4, lng: 8.4, country: 'Norway', geoLevel: 'country' },
+    'pakistan': { lat: 30.3, lng: 69.3, country: 'Pakistan', geoLevel: 'country' },
+    'palestine': { lat: 31.9, lng: 35.2, country: 'Palestine', geoLevel: 'country' },
+    'philippines': { lat: 12.8, lng: 121.7, country: 'Philippines', geoLevel: 'country' },
+    'poland': { lat: 51.9, lng: 19.1, country: 'Poland', geoLevel: 'country' },
+    'portugal': { lat: 39.3, lng: -8.2, country: 'Portugal', geoLevel: 'country' },
+    'russia': { lat: 61.5, lng: 105.3, country: 'Russia', geoLevel: 'country' },
+    'singapore': { lat: 1.3, lng: 103.8, country: 'Singapore', geoLevel: 'country' },
+    'south africa': { lat: -30.5, lng: 22.9, country: 'South Africa', geoLevel: 'country' },
+    'south korea': { lat: 37.5, lng: 126.9, country: 'South Korea', geoLevel: 'country' },
+    'spain': { lat: 40.4, lng: -3.7, country: 'Spain', geoLevel: 'country' },
+    'sweden': { lat: 60.1, lng: 18.6, country: 'Sweden', geoLevel: 'country' },
+    'switzerland': { lat: 46.8, lng: 8.2, country: 'Switzerland', geoLevel: 'country' },
+    'syria': { lat: 34.8, lng: 38.9, country: 'Syria', geoLevel: 'country' },
+    'taiwan': { lat: 23.6, lng: 120.9, country: 'Taiwan', geoLevel: 'country' },
+    'thailand': { lat: 15.8, lng: 100.9, country: 'Thailand', geoLevel: 'country' },
+    'turkey': { lat: 38.9, lng: 35.2, country: 'Turkey', geoLevel: 'country' },
+    'uk': { lat: 55.3, lng: -3.4, country: 'UK', geoLevel: 'country' },
+    'ukraine': { lat: 48.3, lng: 31.1, country: 'Ukraine', geoLevel: 'country' },
+    'usa': { lat: 39.8, lng: -98.5, country: 'USA', geoLevel: 'country' },
+    'venezuela': { lat: 6.4, lng: -66.5, country: 'Venezuela', geoLevel: 'country' },
+    'vietnam': { lat: 14.0, lng: 108.2, country: 'Vietnam', geoLevel: 'country' },
 };
 
-// Major cities for final fallback
-// Major US cities for final fallback (Default to US origin)
-const MAJOR_CITIES: Coordinates[] = [
-    { lat: 40.7, lng: -74.0 },   // New York, NY
-    { lat: 34.0, lng: -118.2 },  // Los Angeles, CA
-    { lat: 41.8, lng: -87.6 },   // Chicago, IL
-    { lat: 29.7, lng: -95.3 },   // Houston, TX
-    { lat: 33.4, lng: -112.0 },  // Phoenix, AZ
-    { lat: 39.9, lng: -75.1 },   // Philadelphia, PA
-    { lat: 29.4, lng: -98.4 },   // San Antonio, TX
-    { lat: 32.7, lng: -117.1 },  // San Diego, CA
-    { lat: 32.7, lng: -96.7 },   // Dallas, TX
-    { lat: 37.3, lng: -121.8 },  // San Jose, CA
-    { lat: 30.2, lng: -97.7 },   // Austin, TX
-    { lat: 30.3, lng: -81.6 },   // Jacksonville, FL
-    { lat: 37.7, lng: -122.4 },  // San Francisco, CA
-    { lat: 47.6, lng: -122.3 },  // Seattle, WA
-    { lat: 39.7, lng: -104.9 },  // Denver, CO
-    { lat: 38.9, lng: -77.0 },   // Washington, DC
-    { lat: 42.3, lng: -71.0 },   // Boston, MA
-    { lat: 36.1, lng: -86.7 },   // Nashville, TN
-    { lat: 36.1, lng: -115.1 },  // Las Vegas, NV
-    { lat: 25.7, lng: -80.1 },   // Miami, FL
-];
+const COUNTRY_ALIASES: Record<string, string> = {
+    'england': 'uk',
+    'united states': 'usa',
+    'korea': 'south korea',
+    'dutch': 'netherlands',
+    'saudi': 'saudi arabia',
+};
 
-// Simple hash for consistent distribution
+const REGIONS: Record<string, LocationEntry> = {
+    'europe': { lat: 50.1, lng: 9.5, country: 'Europe', geoLevel: 'country' },
+    'asia': { lat: 34.0, lng: 100.6, country: 'Asia', geoLevel: 'country' },
+    'africa': { lat: 1.6, lng: 20.9, country: 'Africa', geoLevel: 'country' },
+    'middle east': { lat: 29.3, lng: 47.4, country: 'Middle East', geoLevel: 'country' },
+    'nato': { lat: 50.8, lng: 4.3, country: 'Belgium', geoLevel: 'country' },
+    'eu': { lat: 50.8, lng: 4.3, country: 'Belgium', geoLevel: 'country' },
+};
+
+const US_STATES: Record<string, LocationEntry> = {
+    'california': { lat: 36.7, lng: -119.4, country: 'USA', state: 'California', geoLevel: 'state' },
+    'texas': { lat: 31.0, lng: -97.5, country: 'USA', state: 'Texas', geoLevel: 'state' },
+    'new york': { lat: 42.1, lng: -74.9, country: 'USA', state: 'New York', geoLevel: 'state' },
+    'florida': { lat: 27.6, lng: -81.5, country: 'USA', state: 'Florida', geoLevel: 'state' },
+    'georgia': { lat: 32.1, lng: -82.9, country: 'USA', state: 'Georgia', geoLevel: 'state' },
+    'pennsylvania': { lat: 41.2, lng: -77.2, country: 'USA', state: 'Pennsylvania', geoLevel: 'state' },
+    'ohio': { lat: 40.4, lng: -82.9, country: 'USA', state: 'Ohio', geoLevel: 'state' },
+    'michigan': { lat: 44.3, lng: -85.6, country: 'USA', state: 'Michigan', geoLevel: 'state' },
+    'arizona': { lat: 34.0, lng: -111.0, country: 'USA', state: 'Arizona', geoLevel: 'state' },
+    'nevada': { lat: 38.8, lng: -116.4, country: 'USA', state: 'Nevada', geoLevel: 'state' },
+    'wisconsin': { lat: 43.7, lng: -88.7, country: 'USA', state: 'Wisconsin', geoLevel: 'state' },
+    'dc': { lat: 38.9, lng: -77.0, country: 'USA', state: 'DC', geoLevel: 'state' },
+    'washington': { lat: 38.9, lng: -77.0, country: 'USA', state: 'DC', geoLevel: 'state' },
+};
+
+const OTHER_STATES: Record<string, LocationEntry> = {
+    'gaza': { lat: 31.5, lng: 34.4, country: 'Palestine', state: 'Gaza', geoLevel: 'state' },
+    'crimea': { lat: 44.9, lng: 34.0, country: 'Ukraine', state: 'Crimea', geoLevel: 'state' },
+};
+
+const MAJOR_CITIES: Record<string, LocationEntry> = {
+    // USA
+    'nyc': { lat: 40.7, lng: -74.0, country: 'USA', state: 'New York', geoLevel: 'city' },
+    'ny': { lat: 40.7, lng: -74.0, country: 'USA', state: 'New York', geoLevel: 'city' },
+    'new york city': { lat: 40.7, lng: -74.0, country: 'USA', state: 'New York', geoLevel: 'city' },
+    'san francisco': { lat: 37.7, lng: -122.4, country: 'USA', state: 'California', geoLevel: 'city' },
+    'sf': { lat: 37.7, lng: -122.4, country: 'USA', state: 'California', geoLevel: 'city' },
+    'la': { lat: 34.0, lng: -118.2, country: 'USA', state: 'California', geoLevel: 'city' },
+    'los angeles': { lat: 34.0, lng: -118.2, country: 'USA', state: 'California', geoLevel: 'city' },
+
+    // International
+    'london': { lat: 51.5, lng: -0.1, country: 'UK', geoLevel: 'city' },
+    'paris': { lat: 48.8, lng: 2.3, country: 'France', geoLevel: 'city' },
+    'tokyo': { lat: 35.6, lng: 139.6, country: 'Japan', geoLevel: 'city' },
+    'hong kong': { lat: 22.3, lng: 114.1, country: 'China', geoLevel: 'city' },
+    'dubai': { lat: 25.2, lng: 55.2, country: 'UAE', geoLevel: 'city' },
+    'beijing': { lat: 39.9, lng: 116.4, country: 'China', geoLevel: 'city' },
+    'shanghai': { lat: 31.2, lng: 121.4, country: 'China', geoLevel: 'city' },
+    'mumbai': { lat: 19.0, lng: 72.8, country: 'India', geoLevel: 'city' },
+    'moscow': { lat: 55.7, lng: 37.6, country: 'Russia', geoLevel: 'city' },
+    'kiev': { lat: 50.4, lng: 30.5, country: 'Ukraine', geoLevel: 'city' },
+    'kyiv': { lat: 50.4, lng: 30.5, country: 'Ukraine', geoLevel: 'city' },
+    'berlin': { lat: 52.5, lng: 13.4, country: 'Germany', geoLevel: 'city' },
+    'madrid': { lat: 40.4, lng: -3.7, country: 'Spain', geoLevel: 'city' },
+    'rome': { lat: 41.9, lng: 12.4, country: 'Italy', geoLevel: 'city' },
+    'toronto': { lat: 43.6, lng: -79.3, country: 'Canada', geoLevel: 'city' },
+    'sydney': { lat: -33.8, lng: 151.2, country: 'Australia', geoLevel: 'city' },
+};
+
+// Topic-based semantic mappings (industry hubs)
+const TOPIC_HUBS: Record<string, LocationEntry> = {
+    // Politics & Government
+    'politics': { lat: 38.9, lng: -77.0, country: 'USA', state: 'DC', geoLevel: 'city' },
+    'white house': { lat: 38.9, lng: -77.0, country: 'USA', state: 'DC', geoLevel: 'city' },
+    'elections': { lat: 38.9, lng: -77.0, country: 'USA', state: 'DC', geoLevel: 'city' },
+    'congress': { lat: 38.9, lng: -77.0, country: 'USA', state: 'DC', geoLevel: 'city' },
+
+    // Finance
+    'finance': { lat: 40.7, lng: -74.0, country: 'USA', state: 'New York', geoLevel: 'city' },
+    'wall street': { lat: 40.7, lng: -74.0, country: 'USA', state: 'New York', geoLevel: 'city' },
+    'stock': { lat: 40.7, lng: -74.0, country: 'USA', state: 'New York', geoLevel: 'city' },
+    'stocks': { lat: 40.7, lng: -74.0, country: 'USA', state: 'New York', geoLevel: 'city' },
+
+    // Crypto
+    'crypto': { lat: 37.7, lng: -122.4, country: 'USA', state: 'California', geoLevel: 'city' },
+    'bitcoin': { lat: 37.7, lng: -122.4, country: 'USA', state: 'California', geoLevel: 'city' },
+    'ethereum': { lat: 37.7, lng: -122.4, country: 'USA', state: 'California', geoLevel: 'city' },
+
+    // Tech
+    'tech': { lat: 37.7, lng: -122.4, country: 'USA', state: 'California', geoLevel: 'city' },
+    'ai': { lat: 37.7, lng: -122.4, country: 'USA', state: 'California', geoLevel: 'city' },
+    'silicon valley': { lat: 37.4, lng: -122.1, country: 'USA', state: 'California', geoLevel: 'city' },
+
+    // Entertainment
+    'hollywood': { lat: 34.0, lng: -118.2, country: 'USA', state: 'California', geoLevel: 'city' },
+    'movies': { lat: 34.0, lng: -118.2, country: 'USA', state: 'California', geoLevel: 'city' },
+    'entertainment': { lat: 34.0, lng: -118.2, country: 'USA', state: 'California', geoLevel: 'city' },
+
+    // Sports
+    'nba': { lat: 40.7, lng: -74.0, country: 'USA', state: 'New York', geoLevel: 'city' },
+    'nfl': { lat: 40.7, lng: -74.0, country: 'USA', state: 'New York', geoLevel: 'city' },
+    'soccer': { lat: 51.5, lng: -0.1, country: 'UK', geoLevel: 'city' },
+    'football': { lat: 51.5, lng: -0.1, country: 'UK', geoLevel: 'city' },
+};
+
+// ============================================================================
+// COMPILED LOCATION MAP (Built at module load)
+// ============================================================================
+
+export const LOCATION_MAP: Record<string, LocationEntry> = {
+    ...COUNTRIES,
+    ...REGIONS,
+    ...US_STATES,
+    ...OTHER_STATES,
+    ...MAJOR_CITIES,
+    ...TOPIC_HUBS,
+};
+
+// Apply aliases
+Object.entries(COUNTRY_ALIASES).forEach(([alias, target]) => {
+    const targetLocation = COUNTRIES[target];
+    if (targetLocation) {
+        LOCATION_MAP[alias] = targetLocation;
+    }
+});
+
+// ============================================================================
+// FALLBACK GLOBAL HUBS
+// ============================================================================
+
+export const GLOBAL_HUBS: readonly Coordinates[] = [
+    { lat: 40.7, lng: -74.0, country: 'USA', state: 'New York', geoLevel: 'city' },
+    { lat: 51.5, lng: -0.1, country: 'UK', geoLevel: 'city' },
+    { lat: 35.6, lng: 139.6, country: 'Japan', geoLevel: 'city' },
+    { lat: 22.3, lng: 114.1, country: 'China', geoLevel: 'city' },
+    { lat: 1.3, lng: 103.8, country: 'Singapore', geoLevel: 'city' },
+    { lat: 48.8, lng: 2.3, country: 'France', geoLevel: 'city' },
+    { lat: 31.2, lng: 121.4, country: 'China', geoLevel: 'city' },
+    { lat: 25.2, lng: 55.2, country: 'UAE', geoLevel: 'city' },
+    { lat: -33.8, lng: 151.2, country: 'Australia', geoLevel: 'city' },
+    { lat: 43.6, lng: -79.3, country: 'Canada', geoLevel: 'city' },
+    { lat: 19.0, lng: 72.8, country: 'India', geoLevel: 'city' },
+    { lat: -23.5, lng: -46.6, country: 'Brazil', geoLevel: 'city' },
+    { lat: 55.7, lng: 37.6, country: 'Russia', geoLevel: 'city' },
+    { lat: 37.5, lng: 126.9, country: 'South Korea', geoLevel: 'city' },
+    { lat: 52.5, lng: 13.4, country: 'Germany', geoLevel: 'city' },
+] as const;
+
+// ============================================================================
+// UTILITY FUNCTIONS
+// ============================================================================
+
+class LRUCache<K, V> {
+    private cache = new Map<K, V>();
+    private maxSize: number;
+
+    constructor(maxSize: number = 1000) {
+        this.maxSize = maxSize;
+    }
+
+    get(key: K): V | undefined {
+        const value = this.cache.get(key);
+        if (value !== undefined) {
+            // Move to end (most recent)
+            this.cache.delete(key);
+            this.cache.set(key, value);
+        }
+        return value;
+    }
+
+    set(key: K, value: V): void {
+        // Remove if exists to re-add at end
+        this.cache.delete(key);
+        this.cache.set(key, value);
+
+        // Evict oldest if over capacity
+        if (this.cache.size > this.maxSize) {
+            const firstKey = this.cache.keys().next().value;
+            if (firstKey !== undefined) {
+                this.cache.delete(firstKey);
+            }
+        }
+    }
+
+    has(key: K): boolean {
+        return this.cache.has(key);
+    }
+
+    clear(): void {
+        this.cache.clear();
+    }
+}
+
+const cache = new LRUCache<string, Coordinates>(1000);
+
 function hashString(str: string): number {
     let hash = 0;
     for (let i = 0; i < str.length; i++) {
-        hash = str.charCodeAt(i) + ((hash << 5) - hash);
+        hash = ((hash << 5) - hash) + str.charCodeAt(i);
+        hash |= 0;
     }
     return Math.abs(hash);
 }
 
-/**
- * SMART TAG PARSER: Extracts location from unknown tags
- * e.g., "canadian-election-2025" → finds "canada" → returns Canada coords
- * e.g., "india-pakistan" → finds "india" → returns India coords
- */
-function parseTagForLocation(tag: string): Coordinates | null {
-    const tagLower = tag.toLowerCase();
+function getSpecificity(geoLevel: string): number {
+    const levels = { city: 3, state: 2, country: 1 };
+    return levels[geoLevel as keyof typeof levels] || 0;
+}
 
-    // 1. Direct match first
-    if (LOCATION_DB[tagLower]) {
-        return LOCATION_DB[tagLower];
-    }
+function normalizeText(text: string): string {
+    return text.toLowerCase().replace(/[^\w\s-]/g, '');
+}
 
-    // 2. Search for location keywords within the tag
-    // Sort by length DESC to match longer keywords first (e.g., "netherlands" before "land")
-    const locationKeys = Object.keys(LOCATION_DB).sort((a, b) => b.length - a.length);
+function extractTokens(text: string): string[] {
+    return normalizeText(text).split(/\s+/).filter(t => t.length >= 3);
+}
 
-    for (const key of locationKeys) {
-        if (key.length >= 3 && tagLower.includes(key)) {
-            return LOCATION_DB[key];
+function findBestMatch(
+    candidates: Array<{ coords: LocationEntry; specificity: number }>
+): LocationEntry | null {
+    return candidates.reduce<LocationEntry | null>((best, curr) => {
+        if (!best || curr.specificity > getSpecificity(best.geoLevel)) {
+            return curr.coords;
         }
-    }
-
-    return null;
+        return best;
+    }, null);
 }
 
-// Priority: City (Specificity 3) > District/Region (2) > Country (1)
-// We infer specificity based on typical tag types or explicit overrides
-function getSpecificity(tag: string): number {
-    const lower = tag.toLowerCase();
+// ============================================================================
+// MAIN GEO RESOLUTION FUNCTION
+// ============================================================================
 
-    // Cities / Hubs
-    if (['nyc', 'london', 'paris', 'tokyo', 'dc', 'washington', 'beijing', 'moscow', 'kiev'].some(c => lower.includes(c))) return 3;
+export function getMarketCoordinates(
+    text: string,
+    tags?: string[],
+    dynamicLocations?: Record<string, Coordinates>
+): Coordinates {
+    // 1. Check cache
+    const cacheKey = `${text}|${tags?.join(',')}`;
+    const cached = cache.get(cacheKey);
+    if (cached) return cached;
 
-    // Topics treated as hubs
-    if (['crypto', 'tech', 'ai', 'finance', 'sports'].includes(lower)) return 3;
+    const candidates: Array<{ coords: LocationEntry; specificity: number }> = [];
 
-    // Regions
-    if (['middle-east', 'gaza', 'crimea', 'europe', 'asia'].includes(lower)) return 2;
-
-    // Countries (Default)
-    return 1;
-}
-
-/**
- * Get coordinates for a market using dynamic tags (fast) with smart parsing fallback
- * Priority: City > District > Country > Topic > Country (Inferred)
- * @param text - Market description/slug for hash-based fallback
- * @param tags - Array of tags for location lookup
- * @param dynamicLocations - Dynamic map from DB (slug -> {lat, lng})
- */
-export function getMarketCoordinates(text: string, tags?: string[], dynamicLocations?: Record<string, Coordinates>): Coordinates {
-    // 1. FAST PATH: Check tags with priority logic
-    if (tags && tags.length > 0) {
-        let bestMatch: { coords: Coordinates, specificity: number } | null = null;
-
+    // 2. Priority 1: Check tags
+    if (tags) {
         for (const tag of tags) {
-            let coords: Coordinates | null = null;
-            let specificity = 1;
+            const normalized = tag.toLowerCase();
 
-            // Check dynamic DB locations first
-            if (dynamicLocations && dynamicLocations[tag]) {
-                coords = dynamicLocations[tag];
-                specificity = getSpecificity(tag);
-            }
-            // Fallback to static smart parser
-            else {
-                coords = parseTagForLocation(tag);
-                if (coords) specificity = getSpecificity(tag);
+            // Dynamic overrides (highest priority)
+            if (dynamicLocations?.[normalized]) {
+                const coords = dynamicLocations[normalized];
+                candidates.push({
+                    coords,
+                    specificity: getSpecificity(coords.geoLevel)
+                });
             }
 
-            if (coords) {
-                // Update best match if this tag is more specific or first match
-                if (!bestMatch || specificity > bestMatch.specificity) {
-                    bestMatch = { coords, specificity };
-                }
+            // Static location map
+            if (LOCATION_MAP[normalized]) {
+                candidates.push({
+                    coords: LOCATION_MAP[normalized],
+                    specificity: getSpecificity(LOCATION_MAP[normalized].geoLevel)
+                });
             }
         }
-
-        if (bestMatch) return bestMatch.coords;
     }
 
-    // Final fallback: Distribute to major cities using hash
-    const index = hashString(text) % MAJOR_CITIES.length;
-    return MAJOR_CITIES[index];
+    // 3. Priority 2: Check text tokens
+    const tokens = extractTokens(text);
+
+    // Single tokens
+    for (const token of tokens) {
+        if (LOCATION_MAP[token]) {
+            candidates.push({
+                coords: LOCATION_MAP[token],
+                specificity: getSpecificity(LOCATION_MAP[token].geoLevel)
+            });
+        }
+    }
+
+    // Bigrams (for multi-word locations)
+    for (let i = 0; i < tokens.length - 1; i++) {
+        const bigram = `${tokens[i]} ${tokens[i + 1]}`;
+        if (LOCATION_MAP[bigram]) {
+            candidates.push({
+                coords: LOCATION_MAP[bigram],
+                specificity: getSpecificity(LOCATION_MAP[bigram].geoLevel)
+            });
+        }
+    }
+
+    // 4. Resolve best match or fallback
+    const bestMatch = findBestMatch(candidates);
+    const result: Coordinates = bestMatch || GLOBAL_HUBS[hashString(text) % GLOBAL_HUBS.length];
+
+    // 5. Cache and return
+    cache.set(cacheKey, result);
+    return result;
+}
+
+// ============================================================================
+// UTILITY EXPORTS
+// ============================================================================
+
+export function addDynamicLocation(key: string, coords: Coordinates): void {
+    LOCATION_MAP[key.toLowerCase()] = coords;
+    cache.clear(); // Invalidate cache
+}
+
+export function removeDynamicLocation(key: string): void {
+    delete LOCATION_MAP[key.toLowerCase()];
+    cache.clear();
+}
+
+export function getAllCountries(): string[] {
+    return Array.from(new Set(
+        Object.values(LOCATION_MAP).map(loc => loc.country)
+    )).sort();
+}
+
+export function getLocationsByCountry(country: string): LocationEntry[] {
+    return Object.values(LOCATION_MAP).filter(loc =>
+        loc.country.toLowerCase() === country.toLowerCase()
+    );
+}
+
+export function clearCache(): void {
+    cache.clear();
+}
+
+export function getCacheStats(): { size: number; maxSize: number } {
+    return {
+        size: (cache as any).cache.size,
+        maxSize: 1000
+    };
 }

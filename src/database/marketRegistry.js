@@ -157,6 +157,38 @@ class MarketRegistry {
                 );
             `);
 
+            // 9. SIGNALS (Signal history persistence)
+            await client.query(`
+                CREATE TABLE IF NOT EXISTS signals (
+                    id SERIAL PRIMARY KEY,
+                    signal_id VARCHAR(100) UNIQUE NOT NULL,
+                    type VARCHAR(50) NOT NULL,
+                    severity VARCHAR(20) NOT NULL,
+                    condition_id VARCHAR(255),
+                    region VARCHAR(100),
+                    lat REAL,
+                    lng REAL,
+                    value NUMERIC(18, 4),
+                    metadata JSONB,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            `);
+
+            // 10. USER_SIGNAL_CONFIG (User-configurable signal thresholds)
+            await client.query(`
+                CREATE TABLE IF NOT EXISTS user_signal_config (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                    signal_type VARCHAR(50) NOT NULL,
+                    enabled BOOLEAN DEFAULT TRUE,
+                    threshold NUMERIC(18, 4),
+                    min_severity VARCHAR(20) DEFAULT 'low',
+                    regions TEXT[],
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(user_id, signal_type)
+                );
+            `);
+
             // Indices
             await client.query(`
                 CREATE INDEX IF NOT EXISTS idx_markets_condition_id ON markets(condition_id);
@@ -173,6 +205,11 @@ class MarketRegistry {
                 CREATE INDEX IF NOT EXISTS idx_user_pins_user_id ON user_pins(user_id);
                 CREATE INDEX IF NOT EXISTS idx_tags_slug ON tags(slug);
                 CREATE INDEX IF NOT EXISTS idx_system_events_payload ON system_events USING GIN (payload);
+                CREATE INDEX IF NOT EXISTS idx_signals_type ON signals(type);
+                CREATE INDEX IF NOT EXISTS idx_signals_region ON signals(region);
+                CREATE INDEX IF NOT EXISTS idx_signals_created_at ON signals(created_at);
+                CREATE INDEX IF NOT EXISTS idx_signals_metadata ON signals USING GIN (metadata);
+                CREATE INDEX IF NOT EXISTS idx_user_signal_config_user ON user_signal_config(user_id);
             `);
 
             await client.query('COMMIT');
@@ -765,6 +802,118 @@ class MarketRegistry {
 
     async close() {
         await this.pool.end();
+    }
+
+    // --- Signals ---
+
+    async saveSignal(signal) {
+        try {
+            await this.pool.query(`
+                INSERT INTO signals (signal_id, type, severity, condition_id, region, lat, lng, value, metadata)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                ON CONFLICT (signal_id) DO NOTHING
+            `, [
+                signal.id,
+                signal.type,
+                signal.severity,
+                signal.conditionId,
+                signal.region,
+                signal.coordinates?.lat,
+                signal.coordinates?.lng,
+                signal.value,
+                JSON.stringify(signal.metadata)
+            ]);
+        } catch (e) {
+            console.error('[Registry] Failed to save signal:', e);
+        }
+    }
+
+    async getRecentSignals(limit = 100, filters = {}) {
+        let query = `
+            SELECT * FROM signals 
+            WHERE 1=1
+        `;
+        const params = [];
+        let paramIdx = 1;
+
+        if (filters.type) {
+            query += ` AND type = $${paramIdx++}`;
+            params.push(filters.type);
+        }
+        if (filters.region) {
+            query += ` AND region = $${paramIdx++}`;
+            params.push(filters.region);
+        }
+        if (filters.minSeverity) {
+            const severityOrder = ['low', 'medium', 'high', 'critical'];
+            const minIdx = severityOrder.indexOf(filters.minSeverity);
+            if (minIdx >= 0) {
+                const validSeverities = severityOrder.slice(minIdx);
+                query += ` AND severity = ANY($${paramIdx++})`;
+                params.push(validSeverities);
+            }
+        }
+        if (filters.since) {
+            query += ` AND created_at >= $${paramIdx++}`;
+            params.push(new Date(filters.since));
+        }
+
+        query += ` ORDER BY created_at DESC LIMIT $${paramIdx}`;
+        params.push(limit);
+
+        const res = await this.pool.query(query, params);
+        return res.rows;
+    }
+
+    async pruneOldSignals(retentionDays = 7) {
+        const res = await this.pool.query(`
+            DELETE FROM signals 
+            WHERE created_at < NOW() - INTERVAL '${retentionDays} days'
+        `);
+        if (res.rowCount > 0) {
+            console.log(`[Registry] Pruned ${res.rowCount} old signals.`);
+        }
+        return res.rowCount;
+    }
+
+    // --- User Signal Configuration ---
+
+    async getUserSignalConfig(userId) {
+        const res = await this.pool.query(`
+            SELECT * FROM user_signal_config WHERE user_id = $1
+        `, [userId]);
+
+        // Convert to map by signal_type
+        const configMap = {};
+        for (const row of res.rows) {
+            configMap[row.signal_type] = {
+                enabled: row.enabled,
+                threshold: row.threshold ? parseFloat(row.threshold) : null,
+                minSeverity: row.min_severity,
+                regions: row.regions
+            };
+        }
+        return configMap;
+    }
+
+    async setUserSignalConfig(userId, signalType, config) {
+        await this.pool.query(`
+            INSERT INTO user_signal_config (user_id, signal_type, enabled, threshold, min_severity, regions, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
+            ON CONFLICT (user_id, signal_type) DO UPDATE SET
+                enabled = COALESCE($3, user_signal_config.enabled),
+                threshold = COALESCE($4, user_signal_config.threshold),
+                min_severity = COALESCE($5, user_signal_config.min_severity),
+                regions = COALESCE($6, user_signal_config.regions),
+                updated_at = CURRENT_TIMESTAMP
+        `, [
+            userId,
+            signalType,
+            config.enabled ?? true,
+            config.threshold ?? null,
+            config.minSeverity ?? 'low',
+            config.regions ?? null
+        ]);
     }
 }
 

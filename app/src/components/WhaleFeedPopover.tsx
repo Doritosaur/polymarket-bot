@@ -1,18 +1,25 @@
 import { useState } from "react";
 import { useMarketStore } from "../store/marketStore";
+import { useSignalStore } from "../store/signalStore";
 import { Badge } from "@/components/ui/badge";
-import { Rss, Bell, Settings, X } from "lucide-react";
+import { Rss, Bell, X, AlertTriangle } from "lucide-react";
 import {
     Popover,
     PopoverContent,
     PopoverTrigger,
 } from "@/components/ui/popover";
+import { SignalFeed } from "./SignalFeed";
+import { SignalConfigPanel } from "./SignalConfigPanel";
 
 export function WhaleFeedPopover() {
     const trades = useMarketStore((s) => s.recentTrades);
     const threshold = useMarketStore((s) => s.tradeThreshold);
     const setThreshold = useMarketStore((s) => s.setTradeThreshold);
     const [isOpen, setIsOpen] = useState(false);
+    const [isSignalOpen, setIsSignalOpen] = useState(false);
+
+    // Get signal count for badge
+    const signalCount = useSignalStore((s) => s.signals.length);
 
     // Filter trades by user's threshold (Dollar Value)
     const filteredTrades = trades.filter((t) => (t.size * t.price) >= threshold);
@@ -20,6 +27,33 @@ export function WhaleFeedPopover() {
 
     return (
         <div className="flex items-center gap-2">
+            {/* Signal Alerts Popover */}
+            <Popover open={isSignalOpen} onOpenChange={setIsSignalOpen}>
+                <PopoverTrigger asChild>
+                    <button
+                        className={`p-2 transition relative ${isSignalOpen
+                            ? "text-primary bg-primary/10"
+                            : "text-primary/50 hover:text-primary hover:bg-primary/10"
+                            }`}
+                        title="Signal Alerts"
+                    >
+                        <AlertTriangle className="w-5 h-5" />
+                        {signalCount > 0 && (
+                            <span className="absolute -top-1 -right-1 w-4 h-4 bg-orange-500 text-white text-[10px] font-bold flex items-center justify-center animate-pulse">
+                                {signalCount > 99 ? "99+" : signalCount}
+                            </span>
+                        )}
+                    </button>
+                </PopoverTrigger>
+                <PopoverContent
+                    align="end"
+                    sideOffset={8}
+                    className="w-80 h-[500px] p-0 bg-black border-2 border-primary overflow-hidden"
+                >
+                    <SignalFeed />
+                </PopoverContent>
+            </Popover>
+
             {/* Notification Icon */}
             <button
                 className="p-2 text-primary/50 hover:text-primary hover:bg-primary/10 transition relative"
@@ -28,13 +62,8 @@ export function WhaleFeedPopover() {
                 <Bell className="w-5 h-5" />
             </button>
 
-            {/* Settings Icon */}
-            <button
-                className="p-2 text-primary/50 hover:text-primary hover:bg-primary/10 transition"
-                title="Settings"
-            >
-                <Settings className="w-5 h-5" />
-            </button>
+            {/* Signal Config Panel (Settings) */}
+            <SignalConfigPanel />
 
             {/* Whale Feed Icon with Popover */}
             <Popover open={isOpen} onOpenChange={setIsOpen}>

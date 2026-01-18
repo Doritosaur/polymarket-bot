@@ -21,7 +21,7 @@ const ZONES = [
 ];
 
 interface ZoneFilterProps {
-    onSelectZone: (lng: number, lat: number, zoom: number) => void;
+    onSelectZone: (lng: number, lat: number, zoom: number, zoneId?: string) => void;
 }
 
 export function ZoneFilter({ onSelectZone }: ZoneFilterProps) {
@@ -30,13 +30,14 @@ export function ZoneFilter({ onSelectZone }: ZoneFilterProps) {
 
     const handleSelect = (zone: typeof ZONES[0]) => {
         setSelectedZone(zone.id);
-        onSelectZone(zone.lng, zone.lat, zone.zoom);
+        const zoneId = zone.id === 'global' ? undefined : zone.id;
+        onSelectZone(zone.lng, zone.lat, zone.zoom, zoneId);
         setIsOpen(false);
     };
 
     const handleReset = () => {
         setSelectedZone(null);
-        onSelectZone(0, 20, 1.5); // Reset to default view
+        onSelectZone(0, 20, 1.5, undefined); // Reset to default view
     };
 
     return (

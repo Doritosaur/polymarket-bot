@@ -29,6 +29,16 @@ export const config = {
   polymarket: {
     appUrl: 'https://polymarket.com',
     gammaApiUrl: 'https://gamma-api.polymarket.com'
+  },
+
+  // Signal Engine Configuration
+  signals: {
+    volumeAnomalyThreshold: parseFloat(process.env.SIGNAL_VOLUME_THRESHOLD || '2.0'),
+    velocityThreshold: parseFloat(process.env.SIGNAL_VELOCITY_THRESHOLD || '5.0'),
+    regionalSurgeMinMarkets: parseInt(process.env.SIGNAL_SURGE_MIN_MARKETS || '3'),
+    whaleThreshold: parseFloat(process.env.SIGNAL_WHALE_THRESHOLD || process.env.MIN_AMOUNT_THRESHOLD || '1000'),
+    slidingWindowMs: parseInt(process.env.SIGNAL_SLIDING_WINDOW_MS || '60000'),
+    volumeWindowMs: parseInt(process.env.SIGNAL_VOLUME_WINDOW_MS || '300000')
   }
 };
 

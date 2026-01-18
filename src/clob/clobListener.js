@@ -2,6 +2,7 @@ import { marketRegistry } from '../database/marketRegistry.js';
 import { config } from '../config.js';
 import { TradeAggregator } from './TradeAggregator.js';
 import { broadcast } from '../utils/broadcast.js';
+import { signalEngine } from '../signals/SignalEngine.js';
 
 const WS_URL = config.clobWsUrl;
 
@@ -144,6 +145,20 @@ class TradeProcessor {
                 side: update.side,
                 timestamp: tradeTs,
                 assetInfo
+            });
+
+            // Feed to SignalEngine for pattern detection
+            signalEngine.processTrade({
+                conditionId: assetInfo.conditionId,
+                assetId: update.asset_id,
+                price: parseFloat(update.price),
+                size: parseFloat(update.size),
+                side: update.side,
+                timestamp: tradeTs,
+                marketTitle: assetInfo.question,
+                outcome: assetInfo.outcome,
+                region: assetInfo.region || 'global',
+                coordinates: assetInfo.coordinates
             });
         }
     }

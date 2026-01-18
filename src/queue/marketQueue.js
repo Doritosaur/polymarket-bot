@@ -40,8 +40,10 @@ async function fetchAllActiveMarkets(onBatch) {
                 if (!event.markets) continue;
 
                 // Extract tags from event level (array of {label, slug})
+                // Extract tags from event level (array of {label, slug})
+                // Use label (e.g. "Politics") for better UI display, fallback to slug
                 const eventTags = Array.isArray(event.tags)
-                    ? event.tags.map(t => t.slug).filter(Boolean)
+                    ? event.tags.map(t => t.label || t.slug).filter(Boolean)
                     : [];
 
                 for (const market of event.markets) {

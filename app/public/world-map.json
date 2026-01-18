@@ -1,0 +1,230 @@
+{
+    "version": 8,
+    "id": "polymarket-heatmap-dark-balanced",
+    "sprite": "https://tiles.openfreemap.org/sprites/ofm_f384/ofm",
+    "glyphs": "https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf",
+    "sources": {
+        "openmaptiles": {
+            "type": "vector",
+            "url": "https://tiles.openfreemap.org/planet"
+        }
+    },
+    "layers": [
+        {
+            "id": "background",
+            "type": "background",
+            "paint": {
+                "background-color": "rgb(18,20,24)"
+            }
+        },
+        {
+            "id": "water",
+            "type": "fill",
+            "source": "openmaptiles",
+            "source-layer": "water",
+            "paint": {
+                "fill-color": "rgb(20,24,32)"
+            }
+        },
+        {
+            "id": "landuse",
+            "type": "fill",
+            "source": "openmaptiles",
+            "source-layer": "landuse",
+            "paint": {
+                "fill-color": "rgb(24,26,30)",
+                "fill-opacity": 0.6
+            }
+        },
+        {
+            "id": "roads",
+            "type": "line",
+            "source": "openmaptiles",
+            "source-layer": "transportation",
+            "filter": [
+                "match",
+                [
+                    "geometry-type"
+                ],
+                [
+                    "LineString",
+                    "MultiLineString"
+                ],
+                true,
+                false
+            ],
+            "paint": {
+                "line-color": "rgb(38,40,46)",
+                "line-opacity": 0.35,
+                "line-width": [
+                    "interpolate",
+                    [
+                        "linear"
+                    ],
+                    [
+                        "zoom"
+                    ],
+                    4,
+                    0.2,
+                    8,
+                    0.6,
+                    12,
+                    1.2
+                ]
+            }
+        },
+        {
+            "id": "boundary_country",
+            "type": "line",
+            "source": "openmaptiles",
+            "source-layer": "boundary",
+            "filter": [
+                "==",
+                [
+                    "get",
+                    "admin_level"
+                ],
+                2
+            ],
+            "paint": {
+                "line-color": "rgb(78,82,90)",
+                "line-opacity": 0.35,
+                "line-width": 1
+            }
+        },
+        {
+            "id": "place_country",
+            "type": "symbol",
+            "source": "openmaptiles",
+            "source-layer": "place",
+            "maxzoom": 5,
+            "filter": [
+                "all",
+                [
+                    "==",
+                    [
+                        "get",
+                        "class"
+                    ],
+                    "country"
+                ],
+                [
+                    "has",
+                    "iso_a2"
+                ]
+            ],
+            "layout": {
+                "text-field": [
+                    "get",
+                    "name_en"
+                ],
+                "text-font": [
+                    "Noto Sans Regular"
+                ],
+                "text-size": 11,
+                "text-transform": "uppercase",
+                "text-allow-overlap": false,
+                "text-ignore-placement": false,
+                "symbol-sort-key": 1
+            },
+            "paint": {
+                "text-color": "rgb(150,154,160)",
+                "text-halo-color": "rgba(12,14,18,0.85)",
+                "text-halo-width": 1.2
+            }
+        },
+        {
+            "id": "place_city_large",
+            "type": "symbol",
+            "source": "openmaptiles",
+            "source-layer": "place",
+            "minzoom": 3,
+            "maxzoom": 7,
+            "filter": [
+                "all",
+                [
+                    "==",
+                    [
+                        "get",
+                        "class"
+                    ],
+                    "city"
+                ],
+                [
+                    "<=",
+                    [
+                        "get",
+                        "rank"
+                    ],
+                    3
+                ]
+            ],
+            "layout": {
+                "text-field": [
+                    "get",
+                    "name_en"
+                ],
+                "text-font": [
+                    "Noto Sans Regular"
+                ],
+                "text-size": 12,
+                "text-allow-overlap": false,
+                "text-ignore-placement": false,
+                "symbol-sort-key": 2
+            },
+            "paint": {
+                "text-color": "rgb(150,154,160)",
+                "text-halo-color": "rgba(12,14,18,0.85)",
+                "text-halo-width": 1.2
+            }
+        },
+        {
+            "id": "place_city",
+            "type": "symbol",
+            "source": "openmaptiles",
+            "source-layer": "place",
+            "minzoom": 6,
+            "maxzoom": 10,
+            "filter": [
+                "all",
+                [
+                    "==",
+                    [
+                        "get",
+                        "class"
+                    ],
+                    "city"
+                ],
+                [
+                    "<=",
+                    [
+                        "get",
+                        "rank"
+                    ],
+                    4
+                ]
+            ],
+            "layout": {
+                "text-field": [
+                    "get",
+                    "name_en"
+                ],
+                "text-font": [
+                    "Noto Sans Regular"
+                ],
+                "text-size": 10,
+                "text-allow-overlap": false,
+                "text-ignore-placement": false,
+                "symbol-sort-key": 3
+            },
+            "paint": {
+                "text-color": "rgb(140,144,150)",
+                "text-halo-color": "rgba(12,14,18,0.85)",
+                "text-halo-width": 1
+            }
+        }
+    ],
+    "metadata": {
+        "maputnik:renderer": "mlgljs"
+    }
+}

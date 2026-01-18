@@ -2,6 +2,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Area, AreaChart, ResponsiveContainer, YAxis } from "recharts";
 import type { DisplayMarket } from "../store/marketStore";
 
+import { formatSlug } from "../utils/formatters";
+
 interface MarketCardProps {
     market: DisplayMarket;
 }
@@ -24,7 +26,7 @@ export function MarketCard({ market }: MarketCardProps) {
                     <h3 className="text-sm font-semibold leading-tight text-neutral-100 line-clamp-2" title={market.question}>
                         {market.question}
                     </h3>
-                    <p className="text-[10px] text-neutral-500 truncate mt-0.5">{market.slug}</p>
+                    <p className="text-[10px] text-neutral-500 truncate mt-0.5">{formatSlug(market.slug)}</p>
                 </div>
             </div>
 

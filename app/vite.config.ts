@@ -11,6 +11,10 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  // Enable ES modules for workers (required for h3-js imports)
+  worker: {
+    format: 'es',
+  },
   server: {
     proxy: {
       '/api': {

@@ -1,4 +1,4 @@
-// Unused imports removed - colors defined locally
+import { formatSlug } from './formatters';
 import { TOOLTIP_THEME } from '@/config';
 import type { DisplayMarket } from '../store/marketStore';
 
@@ -67,7 +67,7 @@ export const getTooltipHtml = (object: any): string | null => {
     const marketCount = markets.length;
 
     // Use eventSlug as the main title
-    const title = mp.eventSlug || mp.slug || 'Market';
+    const title = formatSlug(mp.eventSlug || mp.slug || 'Market');
 
     // Calculate aggregate stats
     // Find market with highest volume
@@ -106,7 +106,7 @@ export const getTooltipHtml = (object: any): string | null => {
                 <div style="height: 1px; background: rgba(16, 185, 129, 0.2); margin: 4px 0;"></div>
                 
                 <div style="font-size: 10px; color: ${TOOLTIP_THEME.textMain}; opacity: 0.8; text-transform: uppercase; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                    Top: ${topMarket.slug}
+                    Top: ${formatSlug(topMarket.slug)}
                 </div>
 
                 <div style="display: flex; justify-content: space-between; align-items: center;">
@@ -122,7 +122,7 @@ export const getTooltipHtml = (object: any): string | null => {
         : `
             <div style="padding: 12px;">
                 <div style="font-size: 11px; color: ${TOOLTIP_THEME.textMain}; opacity: 0.7; margin-bottom: 8px; line-clamp: 2; overflow: hidden;">
-                    ${markets[0].slug}
+                    ${formatSlug(markets[0].slug)}
                 </div>
                 <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
                     <div style="display: flex; flex-direction: column;">

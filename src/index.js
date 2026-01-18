@@ -6,6 +6,7 @@ import { marketRegistry } from './database/marketRegistry.js';
 import { startNotificationWorker, closeNotificationQueue } from './queue/notificationQueue.js';
 import { config } from './config.js';
 import { closeBroadcast } from './utils/broadcast.js';
+import { signalEngine } from './signals/SignalEngine.js';
 
 let server = null;
 
@@ -27,6 +28,8 @@ async function start() {
       console.log(`Status: http://localhost:${config.port}/status\n`);
 
       initializeWebSockets(server);
+      signalEngine.start();
+      console.log('[System] Signal Engine started');
     });
 
     process.on('SIGINT', shutdown);
@@ -47,8 +50,12 @@ async function shutdown() {
 
   await closeNotificationQueue();
   await cleanupDiscord();
+  signalEngine.stop();
   await marketRegistry.close();
   closeBroadcast();
+
+  // Prune old signals during shutdown (optional maintenance)
+  await marketRegistry.pruneOldSignals(7).catch(() => { });
 
   console.log('Shutdown complete');
   process.exit(0);

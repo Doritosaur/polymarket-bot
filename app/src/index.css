@@ -169,3 +169,19 @@
 ::-webkit-scrollbar-corner {
   background: transparent;
 }
+
+/* MapLibre Tooltip Styling - Transparent wrapper to show custom tooltip */
+.maplibregl-popup-content {
+  background: transparent !important;
+  padding: 0 !important;
+  box-shadow: none !important;
+  border: none !important;
+}
+
+.maplibregl-popup-tip {
+  display: none !important;
+}
+
+.maplibregl-popup-close-button {
+  display: none !important;
+}

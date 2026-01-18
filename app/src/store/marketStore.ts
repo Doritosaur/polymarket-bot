@@ -45,11 +45,14 @@ interface MarketState {
     pinnedIds: Set<string>;
     pinnedTrades: Trade[];
     tradeThreshold: number; // User's min trade size filter (default 1000)
+    minVolume: number; // Min market volume to show on map (default 10000)
 
     // Tag Filter State
     selectedTags: Set<string>;
     toggleTag: (tag: string) => void;
     clearTags: () => void;
+
+
 
     // Animation state: tracks price changes for pulsing effect
     recentlyUpdated: Map<string, { timestamp: number; direction: 'up' | 'down' }>;
@@ -60,6 +63,8 @@ interface MarketState {
     togglePin: (conditionId: string) => void;
     setPinnedIds: (conditionIds: string[]) => void;
     syncPin: (conditionId: string, isPinned: boolean) => void;
+    // Actions
+    setMinVolume: (volume: number) => void;
     setTradeThreshold: (threshold: number) => void;
     clearStaleUpdates: () => void;
 
@@ -73,7 +78,8 @@ export const useMarketStore = create<MarketState>((set) => ({
     recentTrades: [],
     pinnedIds: new Set<string>(),
     pinnedTrades: [],
-    tradeThreshold: 1000, // Default $1000 threshold
+    tradeThreshold: 1000,
+    minVolume: 0, // Default 0 (show all)
 
     // Tag Filter State
     selectedTags: new Set<string>(),
@@ -229,6 +235,7 @@ export const useMarketStore = create<MarketState>((set) => ({
     }),
 
     setTradeThreshold: (threshold: number) => set({ tradeThreshold: threshold }),
+    setMinVolume: (volume: number) => set({ minVolume: volume }),
 
     toggleTag: (tag: string) => set((state) => {
         const newTags = new Set(state.selectedTags);

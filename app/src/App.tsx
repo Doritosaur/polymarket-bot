@@ -4,8 +4,7 @@ import { Globe, LogOut, Terminal } from "lucide-react";
 
 import { LoginScreen } from './components/LoginScreen';
 import { WhaleFeedPopover } from './components/WhaleFeedPopover';
-import { PinnedFeed } from './components/PinnedFeed';
-import { MapController } from './components/MapController';
+import { SplitViewLayout } from './components/SplitViewLayout';
 import { CRTEffect } from './components/ui/crt-effect';
 import { generateAsciiAvatar } from './utils/asciiAvatar';
 import { Button } from './components/ui/button';
@@ -21,6 +20,7 @@ import {
 } from "./components/ui/dialog"
 import { useMarketStore, type DisplayMarket } from './store/marketStore';
 import { useAuthStore } from './store/authStore';
+import { useSignalStore, type Signal } from './store/signalStore';
 import { SOCKET_URL } from './config';
 
 function App() {
@@ -151,6 +151,12 @@ function App() {
         socket.on('event', onEvent);
         socket.on('market_snapshot', (payload) => onEvent({ type: 'MARKET_SNAPSHOT', payload, timestamp: Date.now() }));
 
+        // Handle signal events from SignalEngine
+        const onSignal = (signal: Signal) => {
+            useSignalStore.getState().addSignal(signal);
+        };
+        socket.on('signal', onSignal);
+
         return () => {
             socket.off('pins_response', onPinsResponse);
             socket.off('pin_toggled', onPinToggled);
@@ -159,6 +165,7 @@ function App() {
             socket.off('connect_error', onConnectError);
             socket.off('event', onEvent);
             socket.off('market_snapshot');
+            socket.off('signal', onSignal);
         };
     }, [socket]);
 
@@ -223,8 +230,8 @@ function App() {
                 </div>
             </aside>
             <main className="flex-1 flex flex-col min-w-0 relative">
-                {/* Header Overlay */}
-                <header className="absolute top-0 left-0 right-0 h-16 bg-black/80 backdrop-blur-sm border-b-2 border-primary px-8 flex items-center justify-between z-10 pointer-events-none">
+                {/* Header (Static) */}
+                <header className="h-16 bg-black border-b-2 border-primary px-8 flex items-center justify-between z-10 shrink-0">
                     <div className="pointer-events-auto">
                         <h1 className="text-xl font-bold tracking-tight text-primary flex items-center gap-2 font-mono">
                             FENT_GOBLIN // <span className="text-xs font-mono text-black bg-primary px-1 animate-pulse">LIVE_CONNECTION</span>
@@ -241,24 +248,11 @@ function App() {
                     </div>
                 </header>
 
-                {/* THE MAP */}
-                <div className="flex-1 bg-black relative flex flex-col min-h-0">
-                    <div className="flex-1 relative min-h-0 border-r-0 border-primary">
-                        <MapController />
-                    </div>
-                    {/* Bottom Panel - Reserved for Extra Features */}
-                    <div className="h-40 shrink-0 border-t-2 border-primary bg-black flex items-center justify-center">
-                        <div className="text-primary/30 font-mono text-xs uppercase tracking-widest">
-                            &gt; EXTRA_FEATURES_COMING_SOON...
-                        </div>
-                    </div>
+                {/* Split View: Map + Event List */}
+                <div className="flex-1 bg-black relative min-h-0">
+                    <SplitViewLayout />
                 </div>
             </main>
-
-            {/* Right Sidebar (Pinned Events) */}
-            <aside className="w-80 bg-black shrink-0 z-20">
-                <PinnedFeed />
-            </aside>
         </div>
     );
 }
