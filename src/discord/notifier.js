@@ -25,26 +25,20 @@ export async function initializeDiscord() {
     [configCmd.data.name]: configCmd.execute
   };
 
-  if (!config.discordToken) {
-    console.warn('Discord token not configured. Notifications disabled.');
-    return;
+  if (!config.discordEnabled) {
+    console.info('[Discord] Disabled (set DISCORD_TOKEN to enable it).');
+    return false;
   }
 
   try {
     if (client) {
       console.warn('Discord client already initialized. Skipping initialization.');
-      return;
+      return true;
     }
 
     client = new Client({
-      intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
-      ],
+      intents: [GatewayIntentBits.Guilds],
     });
-
-    await client.login(config.discordToken);
 
     client.once('clientReady', () => {
       console.log(`Discord bot logged in as ${client.user.tag}`);
@@ -77,8 +71,15 @@ export async function initializeDiscord() {
       console.error('Discord client error:', error);
     });
 
+    await client.login(config.discordToken);
+    return true;
   } catch (error) {
     console.error('Failed to initialize Discord bot:', error.message);
+    if (client) {
+      client.destroy();
+      client = null;
+    }
+    return false;
   }
 }
 

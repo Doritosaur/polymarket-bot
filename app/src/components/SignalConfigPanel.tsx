@@ -2,7 +2,7 @@
  * SignalConfigPanel - User-configurable signal thresholds
  * Allows users to set alert thresholds for each signal type
  */
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useSignalStore, SIGNAL_TYPES, SEVERITY_LEVELS, type SignalType, type Severity } from '../store/signalStore';
 import { Settings, Save, RotateCcw } from 'lucide-react';
 import { Badge } from './ui/badge';
@@ -68,29 +68,37 @@ interface SignalConfigState {
     [key: string]: number;
 }
 
+const createDefaultConfig = (): SignalConfigState => ({
+    [SIGNAL_TYPES.WHALE_ACTIVITY]: DEFAULT_CONFIG.whaleThreshold,
+    [SIGNAL_TYPES.PRICE_VELOCITY]: DEFAULT_CONFIG.velocityThreshold,
+    [SIGNAL_TYPES.VOLUME_ANOMALY]: DEFAULT_CONFIG.volumeMultiplier,
+    [SIGNAL_TYPES.REGIONAL_SURGE]: 3,
+    [SIGNAL_TYPES.MARKET_REVERSAL]: 5
+});
+
+const loadSignalConfig = (): SignalConfigState => {
+    const saved = localStorage.getItem('signalConfig');
+    if (!saved) return createDefaultConfig();
+
+    try {
+        return { ...createDefaultConfig(), ...JSON.parse(saved) };
+    } catch {
+        console.warn('Failed to load saved signal config');
+        return createDefaultConfig();
+    }
+};
+
 export function SignalConfigPanel() {
     const { filters, setMinSeverity, setTypeFilter } = useSignalStore();
     const [isOpen, setIsOpen] = useState(false);
-    const [config, setConfig] = useState<SignalConfigState>({
-        [SIGNAL_TYPES.WHALE_ACTIVITY]: DEFAULT_CONFIG.whaleThreshold,
-        [SIGNAL_TYPES.PRICE_VELOCITY]: DEFAULT_CONFIG.velocityThreshold,
-        [SIGNAL_TYPES.VOLUME_ANOMALY]: DEFAULT_CONFIG.volumeMultiplier,
-        [SIGNAL_TYPES.REGIONAL_SURGE]: 3,
-        [SIGNAL_TYPES.MARKET_REVERSAL]: 5
-    });
+    const [config, setConfig] = useState<SignalConfigState>(loadSignalConfig);
 
     const handleSliderChange = (type: SignalType, value: number) => {
         setConfig(prev => ({ ...prev, [type]: value }));
     };
 
     const handleReset = () => {
-        setConfig({
-            [SIGNAL_TYPES.WHALE_ACTIVITY]: DEFAULT_CONFIG.whaleThreshold,
-            [SIGNAL_TYPES.PRICE_VELOCITY]: DEFAULT_CONFIG.velocityThreshold,
-            [SIGNAL_TYPES.VOLUME_ANOMALY]: DEFAULT_CONFIG.volumeMultiplier,
-            [SIGNAL_TYPES.REGIONAL_SURGE]: 3,
-            [SIGNAL_TYPES.MARKET_REVERSAL]: 5
-        });
+        setConfig(createDefaultConfig());
         setMinSeverity('low');
     };
 
@@ -100,18 +108,6 @@ export function SignalConfigPanel() {
         localStorage.setItem('signalConfig', JSON.stringify(config));
         setIsOpen(false);
     };
-
-    // Load saved config on mount
-    useEffect(() => {
-        const saved = localStorage.getItem('signalConfig');
-        if (saved) {
-            try {
-                setConfig(JSON.parse(saved));
-            } catch (e) {
-                console.warn('Failed to load saved signal config');
-            }
-        }
-    }, []);
 
     return (
         <Sheet open={isOpen} onOpenChange={setIsOpen}>

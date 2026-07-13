@@ -18,7 +18,7 @@ interface AuthState {
 
     setUser: (user: User, token: string) => void;
     logout: () => void;
-    setSocket: (socket: Socket) => void;
+    setSocket: (socket: Socket | null) => void;
     setLoginError: (error: string | null) => void;
     setRegisterError: (error: string | null) => void;
     setStatus: (status: string) => void;

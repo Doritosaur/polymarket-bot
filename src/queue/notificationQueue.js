@@ -2,10 +2,7 @@ import { Queue, Worker } from 'bullmq';
 import { config } from '../config.js';
 import { notifyDiscord } from '../discord/notifier.js';
 
-const connection = {
-    host: config.redisHost,
-    port: config.redisPort
-};
+const connection = config.redisConnection;
 
 // Publisher (Ingest Service uses this)
 export const notificationQueue = new Queue('notification-queue', {

@@ -1,12 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import maplibregl from 'maplibre-gl';
-import { useMarketStore } from "../store/marketStore";
+import { useMarketStore, type DisplayMarket } from "../store/marketStore";
 import { useSplitViewStore } from "../store/splitViewStore";
 import { useSignalStore, type Signal, SIGNAL_TYPES } from "../store/signalStore";
 import { getMarketCoordinates } from "../utils/GeoMapper";
 import { isCountryInZone } from "../utils/ZoneMapping";
 
-// @ts-ignore
 import ClusterWorker from '../workers/cluster.worker?worker';
 // Map click now navigates to EventList instead of opening MarketDetailPanel
 import { getTooltipHtml, getSignalTooltipHtml } from '../utils/mapHelpers';
@@ -25,6 +24,10 @@ import {
 // Use local custom dark style for heatmap-optimized rendering
 const MAP_STYLE = '/world-map.json';
 
+type MapWithTooltip = maplibregl.Map & {
+    _currentTooltip?: maplibregl.Popup | null;
+};
+
 export function MapController() {
     const marketMap = useMarketStore(s => s.marketMap);
     const pinnedIds = useMarketStore(s => s.pinnedIds);
@@ -39,6 +42,13 @@ export function MapController() {
     const setZoom = useSplitViewStore(s => s.setZoom);
     const setVisibleEventIds = useSplitViewStore(s => s.setVisibleEventIds);
     const geoFilter = useSplitViewStore(s => s.geoFilter);
+
+    const handleMarketClick = useCallback((marketData: DisplayMarket) => {
+        setSelected(marketData.conditionId);
+        window.dispatchEvent(new CustomEvent('map-event-selected', {
+            detail: { conditionId: marketData.conditionId }
+        }));
+    }, [setSelected]);
 
     // Map refs
     const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -132,8 +142,7 @@ export function MapController() {
 
             // Helper to clean up any existing tooltip
             const cleanupTooltip = () => {
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                const mapAny = map as any;
+                const mapAny = map as MapWithTooltip;
                 if (mapAny._currentTooltip) {
                     mapAny._currentTooltip.remove();
                     mapAny._currentTooltip = null;
@@ -152,10 +161,10 @@ export function MapController() {
                     className: 'market-tooltip'
                 });
 
-                const html = getTooltipHtml({ ...feature, properties: { ...feature.properties, ...m } } as any);
+                const html = getTooltipHtml({ properties: { ...feature.properties, ...m } });
                 if (html) {
                     popup.setLngLat(lngLat).setHTML(html).addTo(map);
-                    (map as any)._currentTooltip = popup;
+                    (map as MapWithTooltip)._currentTooltip = popup;
                 }
             };
 
@@ -171,10 +180,16 @@ export function MapController() {
                     maxWidth: '300px'
                 });
 
-                const html = getSignalTooltipHtml(p);
+                const html = getSignalTooltipHtml({
+                    type: String(p.type ?? ''),
+                    value: typeof p.value === 'number' ? p.value : String(p.value ?? ''),
+                    severity: String(p.severity ?? 'low'),
+                    label: String(p.label ?? 'Signal'),
+                    marketTitle: p.marketTitle == null ? undefined : String(p.marketTitle)
+                });
 
                 popup.setLngLat(lngLat).setHTML(html).addTo(map);
-                (map as any)._currentTooltip = popup;
+                (map as MapWithTooltip)._currentTooltip = popup;
             };
 
 
@@ -208,8 +223,8 @@ export function MapController() {
                     cleanupTooltip();
 
                     const conditionId = feature.properties?.conditionId;
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    const coords = (feature.geometry as any).coordinates;
+                    if (feature.geometry.type !== 'Point') return;
+                    const coords = feature.geometry.coordinates as [number, number];
                     const m = marketMapRef.current.get(conditionId);
 
                     if (m) {
@@ -270,7 +285,7 @@ export function MapController() {
             map.remove();
             mapRef.current = null;
         };
-    }, []);
+    }, [handleMarketClick, setHovered, setMapBounds, setZoom]);
 
     // Worker Initialization
     useEffect(() => {
@@ -317,7 +332,7 @@ export function MapController() {
         };
 
         return () => worker.terminate();
-    }, []);
+    }, [setVisibleEventIds]);
 
     // Push Data to Worker & Calculate Ranks
     useEffect(() => {
@@ -449,17 +464,6 @@ export function MapController() {
         });
     }, [signals, newSignals]);
 
-    // Handle Market Click - Navigate to event in EventList
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const handleMarketClick = (marketData: any) => {
-        // Set selected ID - EventList will auto-scroll and expand
-        setSelected(marketData.conditionId);
-        // Dispatch event to switch to Events tab if needed
-        window.dispatchEvent(new CustomEvent('map-event-selected', {
-            detail: { conditionId: marketData.conditionId }
-        }));
-    };
-
     const flyTo = useCallback((lng: number, lat: number, zoom: number) => {
         mapRef.current?.flyTo({
             center: [lng, lat],
@@ -472,14 +476,14 @@ export function MapController() {
 
     // Listen for flyTo events from SplitViewLayout controls
     useEffect(() => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
         const handleFlyTo = (e: CustomEvent) => {
             const { lng, lat, zoom } = e.detail;
             flyTo(lng, lat, zoom);
         };
 
         // Handle flyToLocation from SignalFeed
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
         const handleSignalFlyTo = (e: CustomEvent) => {
             const { lng, lat, zoom } = e.detail;
             flyTo(lng, lat, zoom || 5);
@@ -512,4 +516,3 @@ export function MapController() {
         </div>
     );
 }
-

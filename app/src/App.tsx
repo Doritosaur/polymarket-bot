@@ -24,6 +24,52 @@ import { useSignalStore, type Signal } from './store/signalStore';
 import { getMarketCoordinates } from './utils/GeoMapper';
 import { SOCKET_URL } from './config';
 
+interface PinsResponse {
+    pins?: string[];
+}
+
+interface PinToggledResponse {
+    conditionId: string;
+    isPinned: boolean;
+}
+
+interface RawMarket {
+    condition_id: string;
+    description?: string;
+    question?: string;
+    slug: string;
+    event_slug?: string;
+    image: string;
+    end_date: string;
+    yes_asset_id: string;
+    no_asset_id: string;
+    yes_price?: number;
+    no_price?: number;
+    tags?: string[];
+    volume?: number;
+    liquidity?: number;
+}
+
+interface RawTrade {
+    asset_id?: string;
+    assetId?: string;
+    price: string | number;
+    size?: string | number;
+    side: 'BUY' | 'SELL';
+    outcome: string;
+    market_slug?: string;
+}
+
+interface MarketSnapshotPayload {
+    markets?: RawMarket[];
+}
+
+interface ServerEvent {
+    type: string;
+    payload: unknown;
+    timestamp?: number;
+}
+
 function App() {
     const { isAuthenticated, user, token, logout, socket, setSocket, setStatus } = useAuthStore();
 
@@ -37,9 +83,10 @@ function App() {
     useEffect(() => {
         if (!isAuthenticated || !token) {
             // Close any existing connection if user logs out
-            if (socket) {
-                socket.close();
-                setSocket(null as any);
+            const currentSocket = useAuthStore.getState().socket;
+            if (currentSocket) {
+                currentSocket.close();
+                setSocket(null);
             }
             return;
         }
@@ -52,9 +99,9 @@ function App() {
 
         return () => {
             newSocket.close();
-            setSocket(null as any);
+            setSocket(null);
         };
-    }, [isAuthenticated, token]);
+    }, [isAuthenticated, token, setSocket]);
 
 
 
@@ -65,14 +112,14 @@ function App() {
 
 
 
-        const onPinsResponse = (data: any) => {
+        const onPinsResponse = (data: PinsResponse) => {
             if (data.pins) {
                 useMarketStore.getState().setPinnedIds(data.pins);
                 console.log('SYSTEM', `Loaded ${data.pins.length} pinned markets`);
             }
         };
 
-        const onPinToggled = (data: any) => {
+        const onPinToggled = (data: PinToggledResponse) => {
             useMarketStore.getState().syncPin(data.conditionId, data.isPinned);
         };
 
@@ -105,14 +152,15 @@ function App() {
             }
         };
 
-        const onEvent = (data: { type: string; payload: any, timestamp: number }) => {
+        const onEvent = (data: ServerEvent) => {
             if (data.type !== 'MARKET_SNAPSHOT' && data.type !== 'trade_update' && data.type !== 'TRADE') {
                 // console.log(data.type, data.payload);
             }
 
             if (data.type === 'MARKET_SNAPSHOT') {
-                if (data.payload.markets) {
-                    const mappedMarkets: DisplayMarket[] = data.payload.markets.map((m: any) => ({
+                const payload = data.payload as MarketSnapshotPayload;
+                if (payload.markets) {
+                    const mappedMarkets: DisplayMarket[] = payload.markets.map((m) => ({
                         conditionId: m.condition_id,
                         question: m.description || m.question || 'Unknown Market',
                         slug: m.slug,
@@ -133,15 +181,17 @@ function App() {
             }
 
             if (data.type === 'trade_update' || data.type === 'TRADE') {
-                const trade = data.payload;
-                updatePrice(trade.asset_id || trade.assetId, parseFloat(trade.price), data.timestamp || Date.now());
+                const trade = data.payload as RawTrade;
+                const assetId = trade.asset_id || trade.assetId;
+                if (!assetId) return;
+                updatePrice(assetId, Number.parseFloat(String(trade.price)), data.timestamp || Date.now());
 
                 // Allow ALL trades for now (client-side filtering can be added later if needed)
                 // previously: if (parseFloat(trade.size) > 500)
                 addTrade({
                     id: Math.random().toString(),
-                    price: parseFloat(trade.price),
-                    size: parseFloat(trade.size || '0'),
+                    price: Number.parseFloat(String(trade.price)),
+                    size: Number.parseFloat(String(trade.size || '0')),
                     side: trade.side,
                     timestamp: data.timestamp || Date.now(),
                     outcome: trade.outcome,
@@ -189,7 +239,7 @@ function App() {
             socket.off('market_snapshot');
             socket.off('signal', onSignal);
         };
-    }, [socket]);
+    }, [socket, addTrade, logout, setSnapshot, setStatus, updatePrice]);
 
     // Signal Garbage Collection (Runs every 5 seconds)
     useEffect(() => {

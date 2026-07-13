@@ -1,0 +1,60 @@
+services:
+  - type: web
+    name: polymarket-service
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerCommand: bun run start:all
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: polymarket-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: polymarket-redis
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ADMIN_API_KEY
+        generateValue: true
+      - key: MIN_AMOUNT_THRESHOLD
+        value: '1000'
+
+  - type: web
+    name: polymarket-dashboard
+    runtime: static
+    rootDir: app
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    autoDeployTrigger: commit
+    envVars:
+      - key: VITE_API_HOST
+        fromService:
+          type: web
+          name: polymarket-service
+          envVarKey: RENDER_EXTERNAL_HOSTNAME
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+
+  - type: keyvalue
+    name: polymarket-redis
+    plan: free
+    region: singapore
+    ipAllowList: []
+    maxmemoryPolicy: noeviction
+    persistenceMode: off
+
+databases:
+  - name: polymarket-db
+    plan: free
+    region: singapore
+    databaseName: polymarket
+    ipAllowList: []

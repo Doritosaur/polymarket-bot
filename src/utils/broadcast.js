@@ -1,8 +1,8 @@
 import { Redis } from 'ioredis';
 import { config } from '../config.js';
 
-const pub = new Redis(config.redisPort, config.redisHost);
-const sub = new Redis(config.redisPort, config.redisHost);
+const pub = new Redis(config.redisConnection);
+const sub = new Redis(config.redisConnection);
 
 const CHANNEL = 'bot_events';
 

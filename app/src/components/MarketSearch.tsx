@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { Search, X } from 'lucide-react';
-import { useMarketStore } from '../store/marketStore';
+import { useMarketStore, type DisplayMarket } from '../store/marketStore';
 import { getMarketCoordinates } from '../utils/GeoMapper';
 import { Input } from '@/components/ui/input';
 import Fuse from 'fuse.js';
@@ -47,11 +47,11 @@ export function MarketSearch({ onSelectMarket }: MarketSearchProps) {
         if (!query.trim() || query.length < 2) return [];
 
         const searchResults = fuse.search(query);
-        const aggregated = new Map<string, any[]>();
+        const aggregated = new Map<string, DisplayMarket[]>();
 
         // Group matches by Event Slug
         searchResults.forEach(r => {
-            const m = r.item as any;
+            const m = r.item;
             const key = m.eventSlug || m.slug;
             if (!aggregated.has(key)) aggregated.set(key, []);
             aggregated.get(key)!.push(m);
@@ -67,7 +67,7 @@ export function MarketSearch({ onSelectMarket }: MarketSearchProps) {
             .slice(0, 8);
     }, [query, fuse]);
 
-    const handleSelect = (item: { representative: any }) => {
+    const handleSelect = (item: { representative: DisplayMarket }) => {
         const market = item.representative;
         const coords = getMarketCoordinates(market.slug, market.tags);
         onSelectMarket(coords.lng, coords.lat, 20); // Zoom level 5 for focus

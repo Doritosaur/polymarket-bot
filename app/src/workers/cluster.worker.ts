@@ -3,12 +3,50 @@
 // - Spirals markets around district centers so they don't overlap
 // - Returns all points for Heatmap + Top 10 for Glowing Dots
 
+interface SimplifiedMarket {
+    conditionId: string;
+    baseCoords: { lat: number; lng: number };
+    isEvent: boolean;
+    yesPrice: number;
+    country: string;
+    state: string;
+    tags: string[];
+    volume: number | string;
+    question?: string;
+    slug?: string;
+}
+
+interface MarketPoint {
+    type: 'Feature';
+    properties: {
+        cluster: false;
+        conditionId: string;
+        isEvent: boolean;
+        yesPrice: number;
+        country: string;
+        state: string;
+        tags: string[];
+        volume: number;
+        logVolume?: number;
+        title?: string;
+    };
+    geometry: {
+        type: 'Point';
+        coordinates: [number, number];
+    };
+}
+
+type WorkerRequest =
+    | { id: number; type: 'UPDATE_MARKETS'; payload: { markets: SimplifiedMarket[] } }
+    | { id: number; type: 'GET_CLUSTERS'; payload: { bbox: [number, number, number, number] } }
+    | { id: number; type: 'GET_EXPANSION_ZOOM'; payload: { currentZoom: number } };
+
 export type MarketsUpdatedResponse = {
     id: number;
     type: 'MARKETS_UPDATED';
     payload: {
-        points: any[];
-        topPoints: any[];
+        points: MarketPoint[];
+        topPoints: MarketPoint[];
     };
 };
 
@@ -16,7 +54,7 @@ export type ClusterResponse = {
     id: number;
     type: 'CLUSTER_RESULT';
     payload: {
-        clusters: any[];
+        clusters: MarketPoint[];
     };
 };
 
@@ -64,18 +102,18 @@ function getSpiralPos(index: number, centerLng: number, centerLat: number): [num
     ];
 }
 
-let allPoints: any[] = [];
+let allPoints: MarketPoint[] = [];
 
-function processMarkets(markets: any[]): { points: any[], topPoints: any[] } {
+function processMarkets(markets: SimplifiedMarket[]): { points: MarketPoint[], topPoints: MarketPoint[] } {
     // 1. Group by city location (using coarse coords matching)
-    const cities = new Map<string, any[]>();
+    const cities = new Map<string, SimplifiedMarket[]>();
     markets.forEach(m => {
         const key = `${m.baseCoords?.lat.toFixed(2)},${m.baseCoords?.lng.toFixed(2)}`;
         if (!cities.has(key)) cities.set(key, []);
         cities.get(key)!.push(m);
     });
 
-    const points: any[] = [];
+    const points: MarketPoint[] = [];
 
     // 2. Process each city
     cities.forEach((cityMarkets, key) => {
@@ -88,7 +126,7 @@ function processMarkets(markets: any[]): { points: any[], topPoints: any[] } {
         const districts = Array.from({ length: districtCount }, (_, i) => ({
             id: i,
             center: getDistrictCenter(cityLat, cityLng, hashString(key) + i * 999),
-            markets: [] as any[]
+            markets: [] as SimplifiedMarket[]
         }));
 
         // 3. Distribute markets to districts
@@ -111,8 +149,8 @@ function processMarkets(markets: any[]): { points: any[], topPoints: any[] } {
                         country: m.country,
                         state: m.state,
                         tags: m.tags,
-                        volume: parseFloat(m.volume) || 0,
-                        logVolume: Math.log10(Math.max(parseFloat(m.volume) || 1, 1)), // Linearize magnitude for visualization
+                        volume: Number.parseFloat(String(m.volume)) || 0,
+                        logVolume: Math.log10(Math.max(Number.parseFloat(String(m.volume)) || 1, 1)), // Linearize magnitude for visualization
                         title: m.question || m.slug
                     },
                     geometry: {
@@ -128,14 +166,14 @@ function processMarkets(markets: any[]): { points: any[], topPoints: any[] } {
     // User Requirement: "Why am I seeing multiple markets from a city?"
     // Solution: Only show the HIGHEST VOLUME market (Champion) from each city.
 
-    const cityChampions: any[] = [];
+    const cityChampions: MarketPoint[] = [];
 
     cities.forEach((cityMarkets, key) => {
         if (cityMarkets.length === 0) return;
 
         // 1. Find the Champion (Max Volume)
         const champion = cityMarkets.reduce((prev, current) =>
-            (parseFloat(current.volume || 0) > parseFloat(prev.volume || 0)) ? current : prev
+            (Number.parseFloat(String(current.volume || 0)) > Number.parseFloat(String(prev.volume || 0))) ? current : prev
         );
 
         // 2. Create Feature for Champion
@@ -156,7 +194,7 @@ function processMarkets(markets: any[]): { points: any[], topPoints: any[] } {
                 country: champion.country,
                 state: champion.state,
                 tags: champion.tags,
-                volume: parseFloat(champion.volume) || 0,
+                volume: Number.parseFloat(String(champion.volume)) || 0,
                 title: champion.question || champion.slug
             },
             geometry: {
@@ -176,14 +214,14 @@ function processMarkets(markets: any[]): { points: any[], topPoints: any[] } {
 }
 
 // Get visible points (simple bbox filter)
-function getVisiblePoints(bbox: [number, number, number, number]): any[] {
+function getVisiblePoints(bbox: [number, number, number, number]): MarketPoint[] {
     return allPoints.filter(p => {
         const [lng, lat] = p.geometry.coordinates;
         return lng >= bbox[0] && lng <= bbox[2] && lat >= bbox[1] && lat <= bbox[3];
     });
 }
 
-self.onmessage = (e: MessageEvent<any>) => {
+self.onmessage = (e: MessageEvent<WorkerRequest>) => {
     const { id, type, payload } = e.data;
 
     if (type === 'UPDATE_MARKETS') {

@@ -23,8 +23,12 @@ services:
       - POSTGRES_USER=${POSTGRES_USER:-admin}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-adminpassword}
       - POSTGRES_DB=${POSTGRES_DB:-polymarket}
+      - DISCORD_TOKEN=${DISCORD_TOKEN:-}
+      - DISCORD_CLIENT_ID=${DISCORD_CLIENT_ID:-}
+      - DISCORD_GUILD_ID=${DISCORD_GUILD_ID:-}
     env_file:
-      - .env
+      - path: .env
+        required: false
     volumes:
       - ./data:/app/data
     depends_on:
@@ -46,7 +50,8 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-adminpassword}
       - POSTGRES_DB=${POSTGRES_DB:-polymarket}
     env_file:
-      - .env
+      - path: .env
+        required: false
     depends_on:
       - redis
       - postgres

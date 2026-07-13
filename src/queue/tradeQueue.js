@@ -2,10 +2,7 @@ import { Queue, Worker } from 'bullmq';
 import { config } from '../config.js';
 import { notifyDiscord } from '../discord/notifier.js';
 
-const connection = {
-    host: config.redisHost,
-    port: config.redisPort
-};
+const connection = config.redisConnection;
 
 // 1. The Producer Queue
 export const tradeQueue = new Queue('trade-notification-queue', { connection });

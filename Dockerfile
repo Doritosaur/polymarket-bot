@@ -1,4 +1,4 @@
-FROM oven/bun:1 as base
+FROM oven/bun:1 AS base
 WORKDIR /app
 
 # Install dependencies
@@ -7,7 +7,6 @@ RUN bun install --production
 
 # Copy source code
 COPY src ./src
-COPY .env .env
 
 # Expose the API port
 EXPOSE 3000

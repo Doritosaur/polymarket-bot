@@ -274,6 +274,10 @@ class LRUCache<K, V> {
     clear(): void {
         this.cache.clear();
     }
+
+    get size(): number {
+        return this.cache.size;
+    }
 }
 
 const cache = new LRUCache<string, Coordinates>(1000);
@@ -416,7 +420,7 @@ export function clearCache(): void {
 
 export function getCacheStats(): { size: number; maxSize: number } {
     return {
-        size: (cache as any).cache.size,
+        size: cache.size,
         maxSize: 1000
     };
 }

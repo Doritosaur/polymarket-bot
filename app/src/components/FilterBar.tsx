@@ -53,7 +53,7 @@ export function FilterBar() {
         });
         return Array.from(counts.entries())
             .sort((a, b) => b[1] - a[1]);
-    }, [marketMap.size, minVolume, ALLOWED_TAGS_Y]);
+    }, [marketMap, minVolume, ALLOWED_TAGS_Y]);
 
     const activeFilterCount = selectedTags.size + (minVolume > 0 ? 1 : 0);
 

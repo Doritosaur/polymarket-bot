@@ -8,6 +8,39 @@ interface GlowData {
     timestamp: number | undefined;
 }
 
+interface TooltipMarket {
+    conditionId?: string;
+    slug?: string;
+    eventSlug?: string;
+    yesPrice?: number;
+    noPrice?: number;
+    volume?: number | string;
+    liquidity?: number | string;
+    cluster?: boolean;
+    isPinned?: boolean;
+    groupMarkets?: TooltipMarket[];
+}
+
+interface LayoutFeature extends TooltipMarket {
+    properties?: TooltipMarket;
+    geometry: { coordinates: [number, number] };
+}
+
+interface TooltipFeature {
+    properties: TooltipMarket;
+}
+
+interface SignalTooltipProperties {
+    type: string;
+    value: string | number;
+    severity: string;
+    label: string;
+    marketTitle?: string;
+}
+
+const numericValue = (value: number | string | undefined): number =>
+    Number.parseFloat(String(value ?? 0)) || 0;
+
 
 
 export const formatMoney = (amount: number) => {
@@ -24,7 +57,7 @@ export const formatMoney = (amount: number) => {
  */
 export const getGlowData = (
     marketMap: Map<string, DisplayMarket>,
-    layoutFeatures: any[],
+    layoutFeatures: LayoutFeature[],
     now: number
 ): GlowData[] => {
     const glows: GlowData[] = [];
@@ -36,6 +69,7 @@ export const getGlowData = (
         let newestTradeTime = 0;
 
         for (const item of group) {
+            if (!item.conditionId) continue;
             const m = marketMap.get(item.conditionId);
             if (m && m.lastTradeTime && m.lastTradeTime > newestTradeTime) {
                 newestTradeTime = m.lastTradeTime;
@@ -59,7 +93,7 @@ export const getGlowData = (
 /**
  * Generates the HTML string for the Map Tooltip, styled to match app components.
  */
-export const getTooltipHtml = (object: any): string | null => {
+export const getTooltipHtml = (object: TooltipFeature): string | null => {
     if (!object || object.properties?.cluster) return null;
 
     const mp = object.properties;
@@ -71,16 +105,16 @@ export const getTooltipHtml = (object: any): string | null => {
 
     // Calculate aggregate stats
     // Find market with highest volume
-    const topMarket = markets.reduce((prev: any, current: any) =>
-        (parseFloat(prev.volume) || 0) > (parseFloat(current.volume) || 0) ? prev : current
+    const topMarket = markets.reduce((prev, current) =>
+        numericValue(prev.volume) > numericValue(current.volume) ? prev : current
     );
 
-    const topYesP = (topMarket.yesPrice * 100).toFixed(0);
-    const topNoP = (topMarket.noPrice * 100).toFixed(0);
-    const isTopUp = topMarket.yesPrice > 0.5;
+    const topYesP = ((topMarket.yesPrice ?? 0) * 100).toFixed(0);
+    const topNoP = ((topMarket.noPrice ?? 0) * 100).toFixed(0);
+    const isTopUp = (topMarket.yesPrice ?? 0) > 0.5;
 
-    const totalVolume = markets.reduce((sum: number, m: any) => sum + (parseFloat(m.volume) || 0), 0);
-    const totalLiquidity = markets.reduce((sum: number, m: any) => sum + (parseFloat(m.liquidity) || 0), 0);
+    const totalVolume = markets.reduce((sum, m) => sum + numericValue(m.volume), 0);
+    const totalLiquidity = markets.reduce((sum, m) => sum + numericValue(m.liquidity), 0);
 
     // For single market, show its slug; for multi-market events, show count
     const contentHtml = marketCount > 1
@@ -106,7 +140,7 @@ export const getTooltipHtml = (object: any): string | null => {
                 <div style="height: 1px; background: rgba(16, 185, 129, 0.2); margin: 4px 0;"></div>
                 
                 <div style="font-size: 10px; color: ${TOOLTIP_THEME.textMain}; opacity: 0.8; text-transform: uppercase; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                    Top: ${formatSlug(topMarket.slug)}
+                    Top: ${formatSlug(topMarket.slug ?? 'Market')}
                 </div>
 
                 <div style="display: flex; justify-content: space-between; align-items: center;">
@@ -122,7 +156,7 @@ export const getTooltipHtml = (object: any): string | null => {
         : `
             <div style="padding: 12px;">
                 <div style="font-size: 11px; color: ${TOOLTIP_THEME.textMain}; opacity: 0.7; margin-bottom: 8px; line-clamp: 2; overflow: hidden;">
-                    ${formatSlug(markets[0].slug)}
+                    ${formatSlug(markets[0].slug ?? 'Market')}
                 </div>
                 <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
                     <div style="display: flex; flex-direction: column;">
@@ -220,7 +254,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { Fish, TrendingUp, Zap, Globe, RefreshCw, Activity } from 'lucide-react';
 import React from 'react';
 
-export const getSignalTooltipHtml = (p: any): string => {
+export const getSignalTooltipHtml = (p: SignalTooltipProperties): string => {
     if (!p) return '';
 
     // Icon Mapping
@@ -235,16 +269,16 @@ export const getSignalTooltipHtml = (p: any): string => {
         React.createElement(IconComponent, { size: 16, color: "#fff", strokeWidth: 2.5 })
     );
 
-    let valueDisplay = '';
+    let valueDisplay: string;
     if (p.type === 'whale_activity' || p.type === 'volume_anomaly') {
-        const v = parseFloat(p.value || '0');
+        const v = Number.parseFloat(String(p.value || '0'));
         if (v >= 1000000) valueDisplay = `$${(v / 1000000).toFixed(1)}M`;
         else if (v >= 1000) valueDisplay = `$${(v / 1000).toFixed(1)}K`;
         else valueDisplay = `$${v.toFixed(0)}`;
     } else if (p.type === 'price_velocity') {
-        valueDisplay = `${parseFloat(p.value || '0').toFixed(1)}%/min`;
+        valueDisplay = `${Number.parseFloat(String(p.value || '0')).toFixed(1)}%/min`;
     } else {
-        valueDisplay = p.value;
+        valueDisplay = String(p.value);
     }
 
     return `

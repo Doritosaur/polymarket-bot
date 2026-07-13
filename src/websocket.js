@@ -15,7 +15,9 @@ export function initializeWebSockets(server) {
         cors: {
             origin: "*", // Allow dashboard from any origin (Cloudflare tunnel, etc.)
             methods: ["GET", "POST"],
-            credentials: true
+            // Authentication uses the Socket.IO handshake token, not cookies.
+            // Keeping credentials disabled permits the separate Render static origin.
+            credentials: false
         }
     });
 

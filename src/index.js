@@ -15,7 +15,10 @@ async function start() {
     console.log(`[System] Starting Polymer Monitor Bot (Gateway) (PID: ${process.pid})`);
 
     await marketRegistry.initialize();
-    await initializeDiscord();
+    // Discord is an optional integration and must never block the API startup.
+    void initializeDiscord().catch((error) => {
+      console.error('[Discord] Optional integration failed:', error.message);
+    });
 
     // Start consuming notifications from Ingest
     startNotificationWorker();

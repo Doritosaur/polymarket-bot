@@ -5,13 +5,17 @@ import crypto from 'crypto';
 
 class MarketRegistry {
     constructor() {
-        this.pool = new Pool({
-            host: config.db.host,
-            port: config.db.port,
-            user: config.db.user,
-            password: config.db.password,
-            database: config.db.database
-        });
+        const poolConfig = config.db.connectionString
+            ? { connectionString: config.db.connectionString }
+            : {
+                host: config.db.host,
+                port: config.db.port,
+                user: config.db.user,
+                password: config.db.password,
+                database: config.db.database
+            };
+
+        this.pool = new Pool(poolConfig);
 
         // Error handling for idle clients
         this.pool.on('error', (err, client) => {

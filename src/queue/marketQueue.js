@@ -3,10 +3,7 @@ import { config } from '../config.js';
 import { marketRegistry } from '../database/marketRegistry.js';
 import { clobListener } from '../clob/clobListener.js';
 
-const connection = {
-    host: config.redisHost,
-    port: config.redisPort
-};
+const connection = config.redisConnection;
 
 export const marketQueue = new Queue('market-fetch-queue', { connection });
 

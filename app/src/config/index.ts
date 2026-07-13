@@ -1,5 +1,10 @@
-export const API_BASE_URL = ''; // Relative path
-export const SOCKET_URL = '/'; // Relative namespace for Socket.IO
+const configuredApiUrl = import.meta.env.VITE_API_URL?.replace(/\/$/, '');
+const renderApiHost = import.meta.env.VITE_API_HOST;
+
+// Local/Docker development uses the same-origin proxy. Render's static site
+// receives the API hostname from the Blueprint at build time.
+export const API_BASE_URL = configuredApiUrl || (renderApiHost ? `https://${renderApiHost}` : '');
+export const SOCKET_URL = API_BASE_URL || '/';
 
 // === MAP COLORS CONFIGURATION ===
 export const MAP_COLORS = {
@@ -76,18 +81,16 @@ export const MAP_COLORS = {
     ],
 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function buildHeatmapColorExpression(): any[] {
-    const expr: any[] = ['interpolate', ['linear'], ['heatmap-density']];
+export function buildHeatmapColorExpression(): unknown[] {
+    const expr: unknown[] = ['interpolate', ['linear'], ['heatmap-density']];
     MAP_COLORS.heatmap.forEach(({ stop, color }) => {
         expr.push(stop, color);
     });
     return expr;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function buildSignalHeatmapExpression(): any[] {
-    const expr: any[] = ['interpolate', ['linear'], ['heatmap-density']];
+export function buildSignalHeatmapExpression(): unknown[] {
+    const expr: unknown[] = ['interpolate', ['linear'], ['heatmap-density']];
     MAP_COLORS.signalHeatmap.forEach(({ stop, color }) => {
         expr.push(stop, color);
     });
