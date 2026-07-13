@@ -68,12 +68,12 @@ Monitor Polymarket smart contracts for large transactions and get Discord notifi
 
 ## Deploy a Free PoC on Render
 
-The included `render.yaml` deploys the project as four free resources:
+The included `render.yaml` deploys the project as three free resources and
+connects to the existing Render Postgres database named `ai-docs`:
 
 - `polymarket-service`: the API and ingestion service in one supervised container
 - `polymarket-dashboard`: the static React dashboard
 - `polymarket-redis`: a non-persistent Render Key Value instance
-- `polymarket-db`: a Render Postgres database
 
 Push the repository to GitHub or GitLab, choose **New → Blueprint** in Render,
 connect the repository, and apply the Blueprint. No Discord variables are

@@ -12,7 +12,7 @@ services:
         value: production
       - key: DATABASE_URL
         fromDatabase:
-          name: polymarket-db
+          name: ai-docs
           property: connectionString
       - key: REDIS_URL
         fromService:
@@ -51,10 +51,3 @@ services:
     ipAllowList: []
     maxmemoryPolicy: noeviction
     persistenceMode: off
-
-databases:
-  - name: polymarket-db
-    plan: free
-    region: singapore
-    databaseName: polymarket
-    ipAllowList: []
