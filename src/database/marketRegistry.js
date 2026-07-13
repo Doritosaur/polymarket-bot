@@ -48,8 +48,19 @@ class MarketRegistry {
 
     async initializeSchema() {
         const client = await this.pool.connect();
+        const schemaLockName = 'polymarket-bot-schema-v2';
+        let schemaLockAcquired = false;
+        let transactionStarted = false;
+
         try {
+            // Gateway and ingestion start concurrently in the free Render web
+            // service. Serialize DDL to avoid PostgreSQL catalog races while
+            // CREATE TABLE IF NOT EXISTS is running in both processes.
+            await client.query('SELECT pg_advisory_lock(hashtext($1))', [schemaLockName]);
+            schemaLockAcquired = true;
+
             await client.query('BEGIN');
+            transactionStarted = true;
 
             // 1. MARKETS
             await client.query(`
@@ -217,11 +228,17 @@ class MarketRegistry {
             `);
 
             await client.query('COMMIT');
+            transactionStarted = false;
             console.log('Database schema initialized (Refactored v2)');
         } catch (e) {
-            await client.query('ROLLBACK');
+            if (transactionStarted) {
+                await client.query('ROLLBACK');
+            }
             throw e;
         } finally {
+            if (schemaLockAcquired) {
+                await client.query('SELECT pg_advisory_unlock(hashtext($1))', [schemaLockName]);
+            }
             client.release();
         }
     }
