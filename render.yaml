@@ -3,7 +3,7 @@ services:
     name: polymarket-service
     runtime: docker
     plan: free
-    region: singapore
+    region: oregon
     dockerCommand: bun run start:all
     healthCheckPath: /health
     autoDeployTrigger: commit
@@ -47,7 +47,7 @@ services:
   - type: keyvalue
     name: polymarket-redis
     plan: free
-    region: singapore
+    region: oregon
     ipAllowList: []
     maxmemoryPolicy: noeviction
     persistenceMode: off
